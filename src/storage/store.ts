@@ -1,7 +1,6 @@
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {
   AssistantTemplate,
-  TeamActivity,
   TeamAggregate,
   TeamMessage,
 } from '../domain/types.js'
@@ -23,23 +22,17 @@ export interface AgentTeamStore {
   listMessages(teamId: string): TeamMessage[]
   putMessage(value: TeamMessage): Promise<void>
   deleteMessage(id: string): Promise<boolean>
-
-  listActivities(teamId: string): TeamActivity[]
-  putActivity(value: TeamActivity): Promise<void>
-  deleteActivity(id: string): Promise<boolean>
 }
 
 export class DomainAgentTeamStore implements AgentTeamStore {
   private readonly assistants: KvTable<string, AssistantTemplate>
   private readonly teams: KvTable<string, TeamAggregate>
   private readonly messages: KvTable<string, TeamMessage>
-  private readonly activities: KvTable<string, TeamActivity>
 
   constructor(readonly domain: Domain<typeof agentTeamDomainSpec>) {
     this.assistants = domain.table('assistants')
     this.teams = domain.table('teams')
     this.messages = domain.table('messages')
-    this.activities = domain.table('activities')
   }
 
   getAssistant(id: string): AssistantTemplate | undefined {
@@ -99,20 +92,6 @@ export class DomainAgentTeamStore implements AgentTeamStore {
 
   deleteMessage(id: string): Promise<boolean> {
     return this.messages.delete(id)
-  }
-
-  listActivities(teamId: string): TeamActivity[] {
-    return values(this.activities)
-      .filter(activity => activity.teamId === teamId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
-  }
-
-  putActivity(value: TeamActivity): Promise<void> {
-    return this.activities.put(value.id, value)
-  }
-
-  deleteActivity(id: string): Promise<boolean> {
-    return this.activities.delete(id)
   }
 }
 

@@ -83,22 +83,6 @@ describe('Agent Team client requests', () => {
     vi.resetModules()
   })
 
-  it('requests the Skill catalog for one Agent Preset', async () => {
-    const fetch = vi.fn(async (_url: string, init: RequestInit) => ({
-      json: async () => ({ requestId: 'request-1', ok: true, value: { skills: [] } }),
-    }))
-    vi.stubGlobal('fetch', fetch)
-    vi.stubGlobal('crypto', { randomUUID: () => 'request-1' })
-    const { callAgentTeam } = await import('../src/client/api.js')
-
-    await callAgentTeam('skill.catalog', { agentPresetId: 'standard' })
-
-    expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
-      method: 'skill.catalog',
-      payload: { agentPresetId: 'standard' },
-    })
-  })
-
   it('submits a structured team interaction response', async () => {
     const fetch = vi.fn(async (_url: string, _init: RequestInit) => ({
       json: async () => ({ requestId: 'request-1', ok: true, value: { accepted: true } }),
@@ -128,22 +112,6 @@ describe('Agent Team client requests', () => {
           answers: [{ id: 'name', selected: [], custom: 'Reviewer' }],
         },
       },
-    })
-  })
-
-  it('requests the MCP catalog for one Agent Preset', async () => {
-    const fetch = vi.fn(async (_url: string, init: RequestInit) => ({
-      json: async () => ({ requestId: 'request-1', ok: true, value: { servers: [] } }),
-    }))
-    vi.stubGlobal('fetch', fetch)
-    vi.stubGlobal('crypto', { randomUUID: () => 'request-1' })
-    const { callAgentTeam } = await import('../src/client/api.js')
-
-    await callAgentTeam('mcp.catalog', { agentPresetId: 'standard' })
-
-    expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toMatchObject({
-      method: 'mcp.catalog',
-      payload: { agentPresetId: 'standard' },
     })
   })
 

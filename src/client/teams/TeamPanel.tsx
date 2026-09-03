@@ -1,10 +1,8 @@
-import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   IconCloseOutline16,
   IconPlusOutline16,
-  Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   AssistantView,
@@ -86,10 +84,6 @@ export function TeamPanel({
                 catalog={catalog}
                 assistants={assistants}
                 onChanged={onChanged}
-                onCloned={async teamId => {
-                  openTeam(teamId)
-                  await onChanged()
-                }}
               />
             ))}</div>
         : <TeamWorkbench
@@ -162,7 +156,6 @@ function TeamWorkbench({
   const [memberToRemove, setMemberToRemove] = useState<TeamView['members'][string]>()
   const [managementOpen, setManagementOpen] = useState(false)
   const [addMemberOpen, setAddMemberOpen] = useState(false)
-  const [expandedSlotId, setExpandedSlotId] = useState<string>()
   const refreshTimer = useRef<ReturnType<typeof setTimeout>>()
   const loadGeneration = useRef(0)
   const previousMemberIds = useRef(memberIds)
@@ -208,17 +201,6 @@ function TeamWorkbench({
     setVisibleSlots(current => reconcileVisibleMemberSlots(current, previousMemberIds.current, memberIds))
     previousMemberIds.current = memberIds
   }, [team.members])
-  useEffect(() => {
-    if (expandedSlotId !== undefined && team.members[expandedSlotId] === undefined) setExpandedSlotId(undefined)
-  }, [expandedSlotId, team.members])
-  useEffect(() => {
-    if (expandedSlotId === undefined) return
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setExpandedSlotId(undefined)
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => { window.removeEventListener('keydown', closeOnEscape) }
-  }, [expandedSlotId])
 
   function toggleMember(slotId: string): void {
     setVisibleSlots(current => toggleVisibleMemberSlot(current, slotId))
@@ -306,14 +288,6 @@ function TeamWorkbench({
         {memberActionError && memberToRemove === undefined && (
           <div role="alert" className={css.workbenchError}>{memberActionError}</div>
         )}
-        {expandedSlotId !== undefined && (
-          <button
-            type="button"
-            className={css.conversationFocusBackdrop}
-            aria-label="关闭放大对话"
-            onClick={() => { setExpandedSlotId(undefined) }}
-          />
-        )}
         <div className={css.workbenchBody}>
           <div className={css.conversationGrid} style={{ '--member-columns': visibleMembers.length } as React.CSSProperties}>
             {visibleMembers.map(member => (
@@ -325,8 +299,6 @@ function TeamWorkbench({
                 permissionPresets={permissionPresets}
                 onSent={load}
                 onTeamChanged={onChanged}
-                expanded={expandedSlotId === member.id}
-                onExpandedChange={expanded => { setExpandedSlotId(expanded ? member.id : undefined) }}
               />
             ))}
           </div>
@@ -347,11 +319,6 @@ function TeamWorkbench({
             catalog={catalog}
             assistants={assistants}
             onChanged={async () => { await onChanged(); await load() }}
-            onCloned={async teamId => {
-              setManagementOpen(false)
-              openTeam(teamId)
-              await onChanged()
-            }}
             compact
           />
         </div>
@@ -524,126 +491,21 @@ function AddTeamMemberDialog({
   )
 }
 
-function CloneTeamDialog({
-  open,
-  team,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  team: TeamView
-  onClose: () => void
-  onCreated: (teamId: string) => Promise<void>
-}): JSX.Element {
-  const [name, setName] = useState(`${team.name} 副本`)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string>()
-  const members = Object.values(team.members)
-
-  useEffect(() => {
-    if (!open) return
-    setName(`${team.name} 副本`)
-    setSaving(false)
-    setError(undefined)
-  }, [open, team.id, team.name])
-
-  async function submit(event: FormEvent): Promise<void> {
-    event.preventDefault()
-    if (!name.trim()) return
-    setSaving(true)
-    try {
-      const draft = await callAgentTeam('team.clone', {
-        teamId: team.id,
-        name,
-      })
-      await callAgentTeam('team.start', { id: draft.id }, draft.revision)
-      setError(undefined)
-      onClose()
-      await onCreated(draft.id)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  function close(): void {
-    if (saving) return
-    onClose()
-  }
-
-  return (
-    <AnimatedModal
-      open={open}
-      onClose={close}
-      title="复制团队"
-      closeLabel="关闭"
-      description="复用当前团队配置，并为每位成员创建全新 Session。"
-      className={css.cloneTeamDialog ?? ''}
-      contentClassName={css.cloneTeamDialogContent ?? ''}
-    >
-      <form className={css.cloneTeamForm} onSubmit={(event) => { void submit(event) }}>
-        <div className={css.cloneTeamFields}>
-          <Field label="团队名称">
-            <input
-              required
-              value={name}
-              onChange={event => { setName(event.target.value) }}
-              placeholder="输入团队名称"
-              className={css.input}
-              autoFocus
-            />
-          </Field>
-        </div>
-        <section className={css.cloneTeamMembers} aria-label="复制的团队成员">
-          <div className={css.cloneTeamSectionHeader}>
-            <strong>团队成员</strong>
-            <span>{members.length} 人</span>
-          </div>
-          <div className={css.cloneTeamMemberGrid}>
-            {members.map(member => (
-              <div key={member.id} className={`${css.cloneTeamMember} ${member.role === 'leader' ? css.cloneTeamLeader : ''}`}>
-                <span className={css.cloneTeamAvatar}>{member.displayName.slice(0, 1).toUpperCase()}</span>
-                <span className={css.cloneTeamMemberCopy}>
-                  <strong title={member.displayName}>{member.displayName}</strong>
-                  <span>{member.assistantSnapshot.provider} / {member.assistantSnapshot.model}</span>
-                </span>
-                <span className={css.cloneTeamRole}>{member.role === 'leader' ? 'Leader' : '成员'}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-        <p className={css.cloneTeamNotice}>不会复制任务、对话上下文、消息历史或运行状态。</p>
-        {error && <div role="alert" className={css.inlineError}>{error}</div>}
-        <div className={css.cloneTeamActions}>
-          <Button variant="outline" type="button" disabled={saving} onClick={close}>取消</Button>
-          <Button variant="primary" type="submit" disabled={saving || !name.trim()}>
-            {saving ? '复制并启动中…' : '复制并启动'}
-          </Button>
-        </div>
-      </form>
-    </AnimatedModal>
-  )
-}
-
 function TeamCard({
   team,
   catalog,
   assistants,
   onChanged,
-  onCloned,
   compact = false,
 }: {
   team: TeamView
   catalog: CatalogView | undefined
   assistants: AssistantView[]
   onChanged: () => Promise<void>
-  onCloned: (teamId: string) => Promise<void>
   compact?: boolean
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [addingMember, setAddingMember] = useState(false)
-  const [cloneOpen, setCloneOpen] = useState(false)
   const [dissolveOpen, setDissolveOpen] = useState(false)
   const [resetOpen, setResetOpen] = useState(false)
   const [memberToRemove, setMemberToRemove] = useState<{ slotId: string; displayName: string }>()
@@ -781,22 +643,6 @@ function TeamCard({
           ))}
         </div>
       </section>
-      <div className={`${css.contextResetPanel} ${css.cloneTeamPanel ?? ''}`}>
-        <div className={css.contextResetCopy}>
-          <strong>复制团队</strong>
-          <span>复用当前成员和配置，为所有成员创建全新 Session。</span>
-        </div>
-        <Button
-          variant="outline"
-          disabled={busy}
-          onClick={() => {
-            setError(undefined)
-            setCloneOpen(true)
-          }}
-        >
-          复制团队
-        </Button>
-      </div>
       {tasks.length > 0 && (
         <div className={css.taskList}>
           <strong className={css.taskTitle}>任务板</strong>
@@ -853,12 +699,6 @@ function TeamCard({
         assistants={assistants}
         onClose={() => { setAddingMember(false) }}
         onChanged={onChanged}
-      />
-      <CloneTeamDialog
-        open={cloneOpen}
-        team={team}
-        onClose={() => { setCloneOpen(false) }}
-        onCreated={onCloned}
       />
       <AnimatedModal
         open={memberToRemove !== undefined}
@@ -986,7 +826,6 @@ function TeamCard({
             <strong>确定解散“{team.name}”？</strong>
             <p>所有成员将停止，团队任务、消息和配置会被永久删除。助手模板会保留。</p>
           </div>
-          {error && <div role="alert" className={css.inlineError}>{error}</div>}
         </div>
       </AnimatedModal>
     </>
@@ -1037,7 +876,7 @@ function TeamForm({
     if (leaderKey === key) setLeaderKey(remaining[0]?.key)
   }
 
-  async function submit(event: FormEvent): Promise<void> {
+  async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault()
     if (leaderKey === undefined || members.length === 0) return
     setSaving(true)

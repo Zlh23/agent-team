@@ -2,20 +2,15 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import {
   Button,
-  Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   AssistantView,
   CatalogView,
-  McpCatalogView,
-  SkillCatalogView,
 } from '../../transport/contracts.js'
 import { callAgentTeam } from '../api.js'
 import css from '../AgentTeam.module.css'
 import { PERMISSION_LABELS } from '../labels.js'
-import { defaultReasoningLabel, useModelCapabilities } from '../model-reasoning.js'
 import { AnimatedModal, Empty, Field } from '../shared.js'
-import conversationCss from '../workbench/ConversationColumn.module.css'
 
 const ASSISTANT_FORM_ID = 'agent-team-assistant-form'
 const ASSISTANT_EDIT_FORM_ID = 'agent-team-assistant-edit-form'
@@ -140,18 +135,6 @@ function AssistantCard({
   const [error, setError] = useState<string>()
   const [deleteOpen, setDeleteOpen] = useState(false)
 
-  async function clone(): Promise<void> {
-    setBusy(true)
-    try {
-      await callAgentTeam('assistant.clone', { id: assistant.id, name: `${assistant.name} Copy` })
-      await onChanged()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function remove(): Promise<void> {
     setBusy(true)
     try {
@@ -184,19 +167,12 @@ function AssistantCard({
           <strong>{assistant.name}</strong>
           <span className={css.muted}>{assistant.provider} / {assistant.model}</span>
           <span className={css.muted}>
-            Preset: {assistant.agentPresetId} · 权限: {PERMISSION_LABELS[assistant.permissionPresetId] ?? assistant.permissionPresetId} · 思考模式：{assistant.reasoningEffort ?? '模型默认'}
-          </span>
-          <span className={css.muted}>
-            Skills: {assistant.skillAllowlist.length > 0 ? assistant.skillAllowlist.join('、') : '未选择'}
-          </span>
-          <span className={css.muted}>
-            MCP: {assistant.mcpServers.length > 0 ? assistant.mcpServers.join('、') : '未选择'}
+            Preset: {assistant.agentPresetId} · 权限: {PERMISSION_LABELS[assistant.permissionPresetId] ?? assistant.permissionPresetId}
           </span>
           {assistant.description && <p className={css.description}>{assistant.description}</p>}
         </div>
         <div className={css.actions}>
           <button type="button" className={css.secondaryButton} disabled={busy} onClick={onEdit}>编辑</button>
-          <button type="button" className={css.secondaryButton} disabled={busy} onClick={() => { void clone() }}>复制</button>
           <button
             type="button"
             className={css.dangerButton}
@@ -284,19 +260,9 @@ function AssistantForm({
   const [provider, setProvider] = useState(assistant?.provider ?? providers[0]?.id ?? '')
   const models = catalog?.models[provider] ?? []
   const [modelChoice, setModelChoice] = useState(assistant?.model ?? '')
-  const [reasoningEffort, setReasoningEffort] = useState(assistant?.reasoningEffort ?? '')
   const [agentPresetId, setAgentPresetId] = useState(assistant?.agentPresetId ?? presets[0]?.id ?? '')
   const [permissionPresetId, setPermissionPresetId] = useState(assistant?.permissionPresetId ?? permissions[0]?.value ?? '')
-  const [availableSkills, setAvailableSkills] = useState<SkillCatalogView['skills']>([])
-  const [selectedSkills, setSelectedSkills] = useState<string[]>(assistant?.skillAllowlist ?? [])
-  const [skillsLoading, setSkillsLoading] = useState(false)
-  const [skillsError, setSkillsError] = useState<string>()
-  const [availableMcpServers, setAvailableMcpServers] = useState<McpCatalogView['servers']>([])
-  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>(assistant?.mcpServers ?? [])
-  const [mcpLoading, setMcpLoading] = useState(false)
-  const [mcpError, setMcpError] = useState<string>()
   const [error, setError] = useState<string>()
-  const modelCapabilities = useModelCapabilities(provider, modelChoice)
 
   useEffect(() => {
     if (!provider && providers[0]) setProvider(providers[0].id)
@@ -309,67 +275,6 @@ function AssistantForm({
       return models[0]?.id ?? ''
     })
   }, [models])
-  useEffect(() => {
-    if (modelCapabilities.loading || modelCapabilities.value === undefined) return
-    const efforts = modelCapabilities.value.reasoning?.efforts ?? []
-    setReasoningEffort(current => current && !efforts.some(effort => effort.id === current) ? '' : current)
-  }, [modelCapabilities.loading, modelCapabilities.value])
-  useEffect(() => {
-    let active = true
-    if (!agentPresetId) {
-      setAvailableSkills([])
-      setSelectedSkills([])
-      return () => { active = false }
-    }
-    setSkillsLoading(true)
-    setSkillsError(undefined)
-    void callAgentTeam('skill.catalog', { agentPresetId })
-      .then(value => {
-        if (!active) return
-        setAvailableSkills(value.skills)
-        const availableNames = new Set(value.skills.map(skill => skill.name))
-        setSelectedSkills(current => current.filter(name => availableNames.has(name)))
-      })
-      .catch(cause => {
-        if (!active) return
-        setAvailableSkills([])
-        setSelectedSkills([])
-        setSkillsError(cause instanceof Error ? cause.message : String(cause))
-      })
-      .finally(() => {
-        if (active) setSkillsLoading(false)
-      })
-    return () => { active = false }
-  }, [agentPresetId])
-  useEffect(() => {
-    let active = true
-    if (!agentPresetId) {
-      setAvailableMcpServers([])
-      setSelectedMcpServers([])
-      return () => { active = false }
-    }
-    setMcpLoading(true)
-    setMcpError(undefined)
-    void callAgentTeam('mcp.catalog', { agentPresetId })
-      .then(value => {
-        if (!active) return
-        setAvailableMcpServers(value.servers)
-        const availableNames = new Set(value.servers.map(server => server.name))
-        setSelectedMcpServers(current => current.filter(name => availableNames.has(name)))
-      })
-      .catch(cause => {
-        if (!active) return
-        setAvailableMcpServers([])
-        setSelectedMcpServers([])
-        setMcpError(cause instanceof Error ? cause.message : String(cause))
-      })
-      .finally(() => {
-        if (active) setMcpLoading(false)
-      })
-    return () => { active = false }
-  }, [agentPresetId])
-
-  const model = modelChoice
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault()
@@ -383,12 +288,9 @@ function AssistantForm({
           : { description: description.trim() }),
         instructions,
         provider,
-        model,
-        ...(reasoningEffort ? { reasoningEffort } : {}),
+        model: modelChoice,
         agentPresetId,
         permissionPresetId,
-        skillAllowlist: selectedSkills,
-        mcpServers: selectedMcpServers,
       }
       if (assistant === undefined) {
         await callAgentTeam('assistant.create', value)
@@ -424,25 +326,6 @@ function AssistantForm({
             ))}
           </select>
         </Field>
-        {modelCapabilities.value?.reasoning !== undefined && modelCapabilities.value.reasoning.efforts.length > 0 && (
-          <Field label="思考模式">
-            <select
-              value={reasoningEffort}
-              onChange={event => { setReasoningEffort(event.target.value) }}
-              className={css.input}
-              aria-describedby={`${formId}-reasoning-hint`}
-            >
-              <option value="">{defaultReasoningLabel(modelCapabilities.value)}</option>
-              {modelCapabilities.value.reasoning.efforts.map(effort => (
-                <option key={effort.id} value={effort.id}>
-                  {effort.name === effort.id ? effort.name : `${effort.name}（${effort.id}）`}
-                </option>
-              ))}
-            </select>
-            <span id={`${formId}-reasoning-hint`} className={css.hint}>由当前 Provider 和模型决定可用档位。</span>
-          </Field>
-        )}
-        {modelCapabilities.error && <span className={conversationCss.composerError}>{modelCapabilities.error}</span>}
         <Field label="Agent Preset">
           <select required value={agentPresetId} onChange={event => { setAgentPresetId(event.target.value) }} className={css.input}>
             {presets.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -466,66 +349,6 @@ function AssistantForm({
             className={css.input}
           />
           <span className={css.hint}>随助手模板保存，在成员启动时加入系统提示词；这里不填写具体任务。</span>
-        </Field>
-        <Field
-          label={`可用 Skills（已选择 ${selectedSkills.length} 个）`}
-          className={css.fullWidth ?? ''}
-        >
-          <div className={css.skillPicker} role="group" aria-label="选择助手可使用的 Skills">
-            {skillsLoading && <span className={css.hint}>正在读取该 Preset 的 Skills…</span>}
-            {!skillsLoading && skillsError && <span className={conversationCss.composerError}>{skillsError}</span>}
-            {!skillsLoading && !skillsError && availableSkills.length === 0 && (
-              <span className={css.hint}>该 Agent Preset 没有可用的 Skill。</span>
-            )}
-            {!skillsLoading && availableSkills.map(skill => (
-              <label key={skill.name} className={css.skillOption}>
-                <input
-                  type="checkbox"
-                  checked={selectedSkills.includes(skill.name)}
-                  onChange={event => {
-                    setSelectedSkills(current => event.target.checked
-                      ? [...current, skill.name].sort()
-                      : current.filter(name => name !== skill.name))
-                  }}
-                />
-                <span className={css.skillOptionText}>
-                  <strong>{skill.name}{!skill.modelInvocable && skill.userInvocable ? ' · 仅斜杠调用' : ''}</strong>
-                  <small>{skill.description}</small>
-                </span>
-              </label>
-            ))}
-          </div>
-          <span className={css.hint}>只选择这个助手执行任务时可能需要的 Skills；运行时会按任务需要加载具体 Skill 指令。</span>
-        </Field>
-        <Field
-          label={`可用 MCP（已选择 ${selectedMcpServers.length} 个）`}
-          className={css.fullWidth ?? ''}
-        >
-          <div className={css.skillPicker} role="group" aria-label="选择助手可使用的 MCP Server">
-            {mcpLoading && <span className={css.hint}>正在读取该 Preset 的 MCP Server…</span>}
-            {!mcpLoading && mcpError && <span className={conversationCss.composerError}>{mcpError}</span>}
-            {!mcpLoading && !mcpError && availableMcpServers.length === 0 && (
-              <span className={css.hint}>当前 Harness 未为该 Agent Preset 配置 MCP Server。</span>
-            )}
-            {!mcpLoading && availableMcpServers.map(server => (
-              <label key={server.name} className={css.skillOption}>
-                <input
-                  type="checkbox"
-                  checked={selectedMcpServers.includes(server.name)}
-                  onChange={event => {
-                    setSelectedMcpServers(current => event.target.checked
-                      ? [...current, server.name].sort()
-                      : current.filter(name => name !== server.name))
-                  }}
-                />
-                <span className={css.skillOptionText}>
-                  <strong>{server.name}</strong>
-                  <small>{server.tools.length} 个工具</small>
-                </span>
-              </label>
-            ))}
-          </div>
-          <span className={css.hint}>MCP 连接和密钥由 Harness Profile/Preset 统一管理；运行时只向助手开放已选 Server 的工具。</span>
         </Field>
       </div>
       {error && <div role="alert" className={css.inlineError}>{error}</div>}

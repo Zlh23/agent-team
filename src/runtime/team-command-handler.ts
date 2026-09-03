@@ -27,7 +27,7 @@ export class TeamCommandHandler {
   async createTask(
     teamId: string,
     creatorSlotId: string,
-    input: { title: string; description?: string; ownerSlotId?: string; fileScopes?: string[] },
+    input: { title: string; description?: string; ownerSlotId?: string },
   ): Promise<{ taskId: string; status: string; deliveryState?: 'queued' | 'delivered' }> {
     const team = this.service.getTeam(teamId)
     if (team.leaderSlotId !== creatorSlotId) {
@@ -49,7 +49,7 @@ export class TeamCommandHandler {
         recipientSlotId: owner.id,
         taskId,
         type: 'instruction',
-        content: assignmentContent(title, input.description?.trim() ?? '', uniqueStrings(input.fileScopes ?? [])),
+        content: assignmentContent(title, input.description?.trim() ?? ''),
       })
     await this.service.updateRuntimeTeam(
       teamId,
@@ -65,7 +65,6 @@ export class TeamCommandHandler {
             ...(input.ownerSlotId === undefined ? {} : { ownerSlotId: input.ownerSlotId }),
             createdBySlotId: creatorSlotId,
             dependencyIds: [],
-            fileScopes: uniqueStrings(input.fileScopes ?? []),
             revision: 1,
             createdAt: now,
             updatedAt: now,
@@ -218,8 +217,4 @@ function requireShortText(value: string, label: string, maxLength: number): stri
   if (normalized.length === 0) throw new AgentTeamError('INVALID_REQUEST', `${label} cannot be empty`)
   if (normalized.length > maxLength) throw new AgentTeamError('INVALID_REQUEST', `${label} is too long`)
   return normalized
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }

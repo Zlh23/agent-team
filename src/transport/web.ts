@@ -155,45 +155,15 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
     : { expectedRevision: request.expectedRevision }
   switch (request.method) {
     case 'catalog.get': return service.catalog()
-    case 'catalog.model.get': {
-      const payload = z.object({
-        provider: z.string().trim().min(1).max(200),
-        model: z.string().trim().min(1).max(500),
-      }).strict().parse(request.payload)
-      return service.modelCapabilities(payload.provider, payload.model)
-    }
-    case 'skill.catalog': {
-      const payload = z.object({ agentPresetId: z.string().trim().min(1).max(200) }).strict().parse(request.payload)
-      return service.skillCatalog(payload.agentPresetId)
-    }
-    case 'mcp.catalog': {
-      const payload = z.object({ agentPresetId: z.string().trim().min(1).max(200) }).strict().parse(request.payload)
-      return service.mcpCatalog(payload.agentPresetId)
-    }
     case 'assistant.list': return service.listAssistants()
-    case 'assistant.get': return service.getAssistant(idPayload.parse(request.payload).id)
     case 'assistant.create': return service.createAssistant(request.payload as never)
     case 'assistant.update': {
       const payload = z.object({ id: z.string().min(1), value: z.unknown() }).strict().parse(request.payload)
       return service.updateAssistant(payload.id, payload.value as never, options)
     }
-    case 'assistant.clone': {
-      const payload = z.object({ id: z.string().min(1), name: z.string().optional() }).strict().parse(request.payload)
-      return service.cloneAssistant(payload.id, payload.name)
-    }
     case 'assistant.delete': await service.deleteAssistant(idPayload.parse(request.payload).id); return null
     case 'team.list': return service.listTeams()
-    case 'team.get': return service.getTeam(idPayload.parse(request.payload).id)
     case 'team.createDraft': return service.createTeamDraft(request.payload as never)
-    case 'team.clone': {
-      const payload = z.object({
-        teamId: z.string().trim().min(1).max(200),
-        name: z.string().trim().min(1).max(500),
-      }).strict().parse(request.payload)
-      return service.cloneTeam(payload.teamId, {
-        name: payload.name,
-      })
-    }
     case 'team.start': return service.startTeam(idPayload.parse(request.payload).id, options)
     case 'team.addMember': {
       const payload = z.object({ teamId: z.string().min(1), value: z.unknown() }).strict().parse(request.payload)
@@ -259,19 +229,6 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
         payload.teamId,
         payload.slotId,
         payload.permissionPresetId,
-        options,
-      )
-    }
-    case 'team.member.setReasoningEffort': {
-      const payload = z.object({
-        teamId: z.string().min(1),
-        slotId: z.string().min(1),
-        reasoningEffort: z.string().trim().min(1).max(200).optional(),
-      }).strict().parse(request.payload)
-      return service.setMemberReasoningEffort(
-        payload.teamId,
-        payload.slotId,
-        payload.reasoningEffort,
         options,
       )
     }

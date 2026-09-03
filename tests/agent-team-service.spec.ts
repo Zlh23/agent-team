@@ -4,7 +4,6 @@ import type { Config } from '../src/config.js'
 import { AgentTeamError } from '../src/domain/errors.js'
 import type {
   AssistantTemplate,
-  TeamActivity,
   TeamAggregate,
   TeamMessage,
 } from '../src/domain/types.js'
@@ -79,14 +78,11 @@ describe('AgentTeamService', () => {
     const base = {
       schemaVersion: 1 as const,
       description: undefined,
-      icon: undefined,
       instructions: 'Coordinate the team.',
       provider: 'openai',
       model: 'codex',
       agentPresetId: 'default',
       permissionPresetId: 'standard',
-      skillAllowlist: [],
-      mcpServers: [],
       revision: 1,
     }
     await store.putAssistant({
@@ -110,48 +106,6 @@ describe('AgentTeamService', () => {
     ])
   })
 
-  it('lists model- or user-invocable Skills with their invocation policy', async () => {
-    const { service } = createHarness()
-
-    await expect(service.skillCatalog('default')).resolves.toEqual({
-      agentPresetId: 'default',
-      skills: [{
-        name: 'code-review',
-        description: 'Review code changes.',
-        source: 'user-agents',
-        modelInvocable: true,
-        userInvocable: true,
-      }, {
-        name: 'manual-only',
-        description: 'Only users may invoke this.',
-        source: 'user-agents',
-        modelInvocable: false,
-        userInvocable: true,
-      }],
-    })
-  })
-
-  it('groups MCP tools by Server for the chosen Agent Preset', async () => {
-    const { service } = createHarness()
-
-    await expect(service.mcpCatalog('default')).resolves.toEqual({
-      agentPresetId: 'default',
-      servers: [
-        {
-          name: 'figma',
-          tools: [{ name: 'mcp__figma__inspect', description: 'Inspect a Figma node.' }],
-        },
-        {
-          name: 'github',
-          tools: [
-            { name: 'mcp__github__create_issue', description: 'Create an issue.' },
-            { name: 'mcp__github__list_issues', description: 'List issues.' },
-          ],
-        },
-      ],
-    })
-  })
-
   it('localizes built-in permission preset names while preserving their ids', async () => {
     const { service } = createHarness()
 
@@ -161,60 +115,6 @@ describe('AgentTeamService', () => {
         { value: 'workspace-write', name: '允许写入文件' },
       ],
     })
-  })
-
-  it('reads and validates exact-model reasoning efforts without hard-coded ids', async () => {
-    const { service } = createHarness()
-
-    await expect(service.modelCapabilities('openai', 'codex')).resolves.toEqual({
-      provider: 'openai',
-      model: 'codex',
-      reasoning: {
-        efforts: [
-          { id: 'low', name: 'Low', description: 'Faster reasoning.' },
-          { id: 'high', name: 'High' },
-        ],
-        defaultEffort: 'low',
-      },
-    })
-
-    const assistant = await service.createAssistant({
-      ...assistantInput(),
-      reasoningEffort: 'high',
-    })
-    const team = await service.createTeamDraft({
-      name: 'Reasoning Team',
-      members: [{ assistantId: assistant.id, role: 'leader' }],
-    })
-    const member = team.members[team.leaderSlotId]!
-
-    expect(assistant.reasoningEffort).toBe('high')
-    expect(member.reasoningEffort).toBe('high')
-    expect(member.assistantSnapshot.reasoningEffort).toBe('high')
-    await expect(service.createAssistant({
-      ...assistantInput(),
-      reasoningEffort: 'invented',
-    })).rejects.toMatchObject({ code: 'MODEL_REFERENCE_INVALID' })
-  })
-
-  it('changes a draft member reasoning effort without modifying the assistant default', async () => {
-    const { service } = createHarness()
-    const assistant = await service.createAssistant({
-      ...assistantInput(),
-      reasoningEffort: 'low',
-    })
-    const team = await service.createTeamDraft({
-      name: 'Reasoning Override Team',
-      members: [{ assistantId: assistant.id, role: 'leader' }],
-    })
-    const member = team.members[team.leaderSlotId]!
-
-    const changed = await service.setMemberReasoningEffort(team.id, member.id, 'high')
-    const restoredDefault = await service.setMemberReasoningEffort(changed.id, member.id, undefined)
-
-    expect(changed.members[member.id]?.reasoningEffort).toBe('high')
-    expect(restoredDefault.members[member.id]?.reasoningEffort).toBeUndefined()
-    expect(service.getAssistant(assistant.id).reasoningEffort).toBe('low')
   })
 
   it('validates an assistant draft without storing it', async () => {
@@ -242,127 +142,30 @@ describe('AgentTeamService', () => {
     expect(Object.values(team.members)).toHaveLength(2)
     expect(Object.values(team.members).map(member => member.displayName)).toEqual(['Codex Lead', 'Codex Lead'])
     expect(new Set(Object.values(team.members).map(member => member.sessionId)).size).toBe(2)
-    expect(() => service.getAssistant(assistant.id)).not.toThrow()
+    expect(store.getAssistant(assistant.id)).toBeDefined()
 
     await expect(service.dissolveTeam(team.id, 'wrong')).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     await service.dissolveTeam(team.id, team.name)
 
     expect(store.getTeam(team.id)).toBeUndefined()
     expect(store.listMessages(team.id)).toHaveLength(0)
-    expect(store.listActivities(team.id)).toHaveLength(0)
-    expect(service.getAssistant(assistant.id).name).toBe('Codex Lead')
+    expect(store.getAssistant(assistant.id)?.name).toBe('Codex Lead')
   })
 
-  it('clones team configuration into fresh members and sessions without runtime records', async () => {
-    const { service, store } = createHarness()
-    const assistant = await service.createAssistant({
-      ...assistantInput(),
-      reasoningEffort: 'low',
-      skillAllowlist: ['code-review'],
-      mcpServers: ['github'],
-    })
-    const draft = await service.createTeamDraft({
-      name: 'Source Team',
-      directMemberChat: false,
-      members: [
-        { assistantId: assistant.id, role: 'leader' },
-        { assistantId: assistant.id, role: 'member' },
-      ],
-    })
-    const memberId = Object.values(draft.members).find(member => member.role === 'member')!.id
-    const configured = await service.setMemberPermissionPreset(draft.id, memberId, 'workspace-write')
-    const source = await store.updateTeam(configured.id, team => ({
-      ...team,
-      tasks: {
-        'task-1': {
-          id: 'task-1',
-          title: 'Existing work',
-          description: 'Do not copy this task.',
-          status: 'running',
-          ownerSlotId: memberId,
-          dependencyIds: [],
-          fileScopes: [],
-          revision: 1,
-          createdAt: team.createdAt,
-          updatedAt: team.updatedAt,
-        },
-      },
-    }))
-    await service.updateAssistant(assistant.id, { instructions: 'Updated after team creation.' })
-
-    const clone = await service.cloneTeam(source.id, {
-      name: 'Copied Team',
-    })
-    const sourceMembers = Object.values(source.members)
-    const clonedMembers = Object.values(clone.members)
-
-    expect(clone).toMatchObject({
-      name: 'Copied Team',
-      state: 'draft',
-      directMemberChat: false,
-      revision: 1,
-      tasks: {},
-      leases: {},
-      outbox: {},
-      retiredSessions: {},
-    })
-    expect(clone.id).not.toBe(source.id)
-    expect(clonedMembers.map(member => member.displayName)).toEqual(sourceMembers.map(member => member.displayName))
-    expect(clonedMembers.map(member => member.role)).toEqual(sourceMembers.map(member => member.role))
-    expect(clonedMembers.map(member => member.permissionPresetId)).toEqual(sourceMembers.map(member => member.permissionPresetId))
-    expect(clonedMembers.every(member => member.assistantSnapshot.instructions === 'Coordinate the team.')).toBe(true)
-    expect(clonedMembers.every(member => member.assistantSnapshot.skillAllowlist[0] === 'code-review')).toBe(true)
-    expect(clonedMembers.every(member => member.assistantSnapshot.mcpServers[0] === 'github')).toBe(true)
-    expect(new Set(clonedMembers.map(member => member.id)).size).toBe(clonedMembers.length)
-    expect(new Set(clonedMembers.map(member => member.sessionId)).size).toBe(clonedMembers.length)
-    expect(clonedMembers.every(member => !sourceMembers.some(sourceMember => sourceMember.id === member.id))).toBe(true)
-    expect(clonedMembers.every(member => !sourceMembers.some(sourceMember => sourceMember.sessionId === member.sessionId))).toBe(true)
-    expect(clone.members[clone.leaderSlotId]?.role).toBe('leader')
-    expect(service.getTeam(source.id).tasks['task-1']).toBeDefined()
-  })
-
-  it('rejects malformed Skill names before storing a template', async () => {
+  it('rejects unknown agent presets before storing a template', async () => {
     const { service } = createHarness()
     await expect(service.createAssistant({
       ...assistantInput(),
-      skillAllowlist: ['Not A Skill'],
-    })).rejects.toMatchObject({ code: 'SKILL_REFERENCE_INVALID' })
+      agentPresetId: 'missing-preset',
+    })).rejects.toMatchObject({ code: 'PRESET_REFERENCE_INVALID' })
   })
 
-  it('rejects MCP Servers that are malformed or unavailable to the Agent Preset', async () => {
-    const { service } = createHarness()
-
-    await expect(service.createAssistant({
-      ...assistantInput(),
-      mcpServers: ['bad server'],
-    })).rejects.toMatchObject({ code: 'MCP_REFERENCE_INVALID' })
-    await expect(service.createAssistant({
-      ...assistantInput(),
-      mcpServers: ['missing'],
-    })).rejects.toMatchObject({ code: 'MCP_REFERENCE_INVALID' })
-  })
-
-  it('persists selected MCP Servers into new team member snapshots', async () => {
-    const { service } = createHarness()
-    const assistant = await service.createAssistant({
-      ...assistantInput(),
-      mcpServers: ['github', 'github'],
-    })
-    const team = await service.createTeamDraft({
-      name: 'MCP Team',
-      members: [{ assistantId: assistant.id, role: 'leader' }],
-    })
-
-    expect(assistant.mcpServers).toEqual(['github'])
-    expect(Object.values(team.members)[0]?.assistantSnapshot.mcpServers).toEqual(['github'])
-  })
-
-  it('rejects the removed maxTokens field', async () => {
+  it('rejects unknown permission presets before storing a template', async () => {
     const { service } = createHarness()
     await expect(service.createAssistant({
       ...assistantInput(),
-      maxTokens: 4096,
-    } as never)).rejects.toThrow()
+      permissionPresetId: 'no-such-preset',
+    })).rejects.toMatchObject({ code: 'PERMISSION_PRESET_INVALID' })
   })
 
   it('dissolves a started team while preserving its assistant template', async () => {
@@ -418,7 +221,7 @@ describe('AgentTeamService', () => {
   })
 
   it('adds, promotes, and removes draft members without changing templates', async () => {
-    const { service } = createHarness()
+    const { service, store } = createHarness()
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Mutable Draft',
@@ -433,7 +236,7 @@ describe('AgentTeamService', () => {
     const removed = await service.removeMember(promoted.id, original.id, { expectedRevision: promoted.revision })
 
     expect(Object.values(removed.members).map(member => member.displayName)).toEqual(['Codex Lead'])
-    expect(service.getAssistant(assistant.id).revision).toBe(1)
+    expect(store.getAssistant(assistant.id)?.revision).toBe(1)
   })
 
   it('notifies the leader after a new live member is ready', async () => {
@@ -497,7 +300,6 @@ describe('AgentTeamService', () => {
       title: 'Implement parser',
       description: 'Add the parser implementation.',
       ownerSlotId: member.id,
-      fileScopes: ['src/parser.ts'],
     })
 
     expect(created).toMatchObject({ status: 'assigned', deliveryState: 'delivered' })
@@ -658,7 +460,7 @@ describe('AgentTeamService', () => {
     expect(permissionSet).toHaveBeenCalledWith(expect.anything(), 'workspace-write')
     expect(changed.members[member.id]?.permissionPresetId).toBe('workspace-write')
     expect(changed.members[member.id]?.assistantSnapshot.permissionPresetId).toBe('standard')
-    expect(service.getAssistant(assistant.id).permissionPresetId).toBe('standard')
+    expect(store.getAssistant(assistant.id)?.permissionPresetId).toBe('standard')
   })
 
   it('clears every task and rotates every member onto a fresh Session', async () => {
@@ -683,7 +485,6 @@ describe('AgentTeamService', () => {
           status: 'running',
           ownerSlotId: Object.values(team.members).find(member => member.role === 'member')?.id,
           dependencyIds: [],
-          fileScopes: ['src/old.ts'],
           revision: 1,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -705,7 +506,6 @@ describe('AgentTeamService', () => {
 
     expect(reset.state).toBe('active')
     expect(Object.keys(reset.tasks)).toHaveLength(0)
-    expect(Object.keys(reset.leases)).toHaveLength(0)
     expect(Object.keys(reset.outbox)).toHaveLength(0)
     const newSessionIds = Object.values(reset.members).map(member => member.sessionId)
     expect(newSessionIds).toHaveLength(oldSessionIds.length)
@@ -727,49 +527,13 @@ function createHarness(workspacePath = '/tmp/agent-team-workspace'): {
   ctx.provide('llm', {
     listProviders: () => [{ id: 'openai', name: 'OpenAI' }],
     listModels: async () => [{ id: 'codex', name: 'Codex' }],
-    resolveModelInfo: async (provider: string, model: string) => ({
-      provider,
-      model,
-      reasoning: {
-        efforts: [
-          { id: 'low', name: 'Low', description: 'Faster reasoning.' },
-          { id: 'high', name: 'High' },
-        ],
-        defaultEffort: 'low',
-      },
-    }),
   } as never)
   ctx.provide('agentPresets', {
     list: async () => [{ id: 'default', name: 'Default' }],
-    resolve: async (id: string) => ({ id, name: id }),
-    standingKeyFor: async () => ({ kind: 'preset-scope' }),
-  } as never)
-  ctx.provide('tools', {
-    get: (name: string) => name === 'skill' ? { name: 'skill' } : undefined,
-    schemas: () => [
-      { name: 'skill', description: 'Load one Skill.' },
-      { name: 'mcp__github__list_issues', description: 'List issues.' },
-      { name: 'mcp__figma__inspect', description: 'Inspect a Figma node.' },
-      { name: 'mcp__github__create_issue', description: 'Create an issue.' },
-    ],
-  } as never)
-  ctx.provide('skills', {
-    list: async () => [
-      {
-        name: 'code-review',
-        description: 'Review code changes.',
-        invocation: { modelInvocable: true, userInvocable: true },
-        source: 'user-agents',
-        provider: 'filesystem',
-      },
-      {
-        name: 'manual-only',
-        description: 'Only users may invoke this.',
-        invocation: { modelInvocable: false, userInvocable: true },
-        source: 'user-agents',
-        provider: 'filesystem',
-      },
-    ],
+    resolve: async (id: string) => {
+      if (id === 'default') return { id, name: id }
+      throw new Error(`unknown preset ${id}`)
+    },
   } as never)
   const permissionSet = vi.fn()
   ctx.provide('permissionPresets', {
@@ -857,8 +621,6 @@ function assistantInput() {
     model: 'codex',
     agentPresetId: 'default',
     permissionPresetId: 'standard',
-    skillAllowlist: [],
-    mcpServers: [],
   }
 }
 
@@ -866,7 +628,6 @@ class MemoryStore implements AgentTeamStore {
   private assistants = new Map<string, AssistantTemplate>()
   private teams = new Map<string, TeamAggregate>()
   private messages = new Map<string, TeamMessage>()
-  private activities = new Map<string, TeamActivity>()
 
   getAssistant(id: string) { return this.assistants.get(id) }
   listAssistants() { return [...this.assistants.values()] }
@@ -887,10 +648,6 @@ class MemoryStore implements AgentTeamStore {
   listMessages(teamId: string) { return [...this.messages.values()].filter(value => value.teamId === teamId) }
   async putMessage(value: TeamMessage) { this.messages.set(value.id, value) }
   async deleteMessage(id: string) { return this.messages.delete(id) }
-
-  listActivities(teamId: string) { return [...this.activities.values()].filter(value => value.teamId === teamId) }
-  async putActivity(value: TeamActivity) { this.activities.set(value.id, value) }
-  async deleteActivity(id: string) { return this.activities.delete(id) }
 }
 
 async function updateMap<T>(map: Map<string, T>, id: string, update: (current: T) => T): Promise<T> {

@@ -66,11 +66,10 @@ export function createSystemTeamMessage(input: {
   })
 }
 
-export function assignmentContent(title: string, description: string, fileScopes: readonly string[]): string {
+export function assignmentContent(title: string, description: string): string {
   return [
     `A team task has been assigned to you: ${title}`,
     description.length === 0 ? undefined : `Description: ${description}`,
-    fileScopes.length === 0 ? undefined : `File scopes: ${fileScopes.join(', ')}`,
     'Read the task board for the task id, mark it running when you begin, and report progress or the final result with team_update_task.',
   ].filter((line): line is string => line !== undefined).join('\n')
 }

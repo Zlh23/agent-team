@@ -1,16 +1,13 @@
 import type { z } from 'zod'
 import type {
-  assistantSnapshotSchema,
   addTeamMemberInputSchema,
+  assistantSnapshotSchema,
   assistantTemplateSchema,
-  cloneTeamInputSchema,
   createAssistantInputSchema,
   createTeamDraftInputSchema,
   createTeamMemberInputSchema,
-  fileScopeLeaseSchema,
   memberRuntimeStateSchema,
   retiredMemberSessionSchema,
-  teamActivitySchema,
   teamAggregateSchema,
   teamMemberSlotSchema,
   teamMessageSchema,
@@ -26,14 +23,11 @@ export type MemberRuntimeState = z.infer<typeof memberRuntimeStateSchema>
 export type TeamMemberSlot = z.infer<typeof teamMemberSlotSchema>
 export type RetiredMemberSession = z.infer<typeof retiredMemberSessionSchema>
 export type TeamTask = z.infer<typeof teamTaskSchema>
-export type FileScopeLease = z.infer<typeof fileScopeLeaseSchema>
 export type TeamAggregate = z.infer<typeof teamAggregateSchema>
 export type TeamMessage = z.infer<typeof teamMessageSchema>
-export type TeamActivity = z.infer<typeof teamActivitySchema>
 export type CreateTeamMemberInput = z.infer<typeof createTeamMemberInputSchema>
 export type AddTeamMemberInput = z.infer<typeof addTeamMemberInputSchema>
 export type CreateTeamDraftInput = z.infer<typeof createTeamDraftInputSchema>
-export type CloneTeamInput = z.infer<typeof cloneTeamInputSchema>
 
 export interface Page<T> {
   items: T[]
@@ -48,10 +42,7 @@ export function snapshotAssistant(assistant: AssistantTemplate): AssistantSnapsh
     instructions: assistant.instructions,
     provider: assistant.provider,
     model: assistant.model,
-    ...(assistant.reasoningEffort === undefined ? {} : { reasoningEffort: assistant.reasoningEffort }),
     agentPresetId: assistant.agentPresetId,
     permissionPresetId: assistant.permissionPresetId,
-    skillAllowlist: [...assistant.skillAllowlist],
-    mcpServers: [...assistant.mcpServers],
   }
 }

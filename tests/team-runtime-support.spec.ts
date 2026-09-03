@@ -32,8 +32,8 @@ describe('team runtime support', () => {
     expect(teamMessageHeader('Coder', 'coder-slot')).toBe(
       '[Team message from Coder; slotId=coder-slot]',
     )
-    expect(assignmentContent('Parser', 'Implement it.', ['src/parser.ts'])).toContain(
-      'File scopes: src/parser.ts',
+    expect(assignmentContent('Parser', 'Implement it.')).toContain(
+      'Description: Implement it.',
     )
     expect(taskMessageType('completed')).toBe('result')
     expect(taskMessageType('blocked')).toBe('question')

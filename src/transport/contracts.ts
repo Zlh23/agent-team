@@ -1,7 +1,6 @@
 import type {
   AddTeamMemberInput,
   AssistantTemplate,
-  CloneTeamInput,
   CreateAssistantInput,
   CreateTeamDraftInput,
   TeamAggregate,
@@ -14,19 +13,12 @@ export const AGENT_TEAM_EVENTS_PATH = '/agent-team/events'
 
 export const AGENT_TEAM_METHODS = [
   'catalog.get',
-  'catalog.model.get',
-  'skill.catalog',
-  'mcp.catalog',
   'assistant.list',
-  'assistant.get',
   'assistant.create',
   'assistant.update',
-  'assistant.clone',
   'assistant.delete',
   'team.list',
-  'team.get',
   'team.createDraft',
-  'team.clone',
   'team.start',
   'team.addMember',
   'team.removeMember',
@@ -37,7 +29,6 @@ export const AGENT_TEAM_METHODS = [
   'team.member.stop',
   'team.interaction.respond',
   'team.member.setPermissionPreset',
-  'team.member.setReasoningEffort',
   'team.dissolve',
 ] as const
 
@@ -56,34 +47,6 @@ export interface CatalogView {
   models: Record<string, Array<{ id: string; name: string; description?: string }>>
   agentPresets: Array<{ id: string; name: string; description?: string; broken?: string }>
   permissionPresets: Array<{ value: string; name: string; description?: string }>
-}
-
-export interface ModelCapabilitiesView {
-  provider: string
-  model: string
-  reasoning?: {
-    efforts: Array<{ id: string; name: string; description?: string }>
-    defaultEffort?: string
-  }
-}
-
-export interface SkillCatalogView {
-  agentPresetId: string
-  skills: Array<{
-    name: string
-    description: string
-    source: string
-    modelInvocable: boolean
-    userInvocable: boolean
-  }>
-}
-
-export interface McpCatalogView {
-  agentPresetId: string
-  servers: Array<{
-    name: string
-    tools: Array<{ name: string; description: string }>
-  }>
 }
 
 export type ConversationNode =
@@ -198,22 +161,12 @@ export interface TeamWorkbenchView {
 
 export interface AgentTeamRequestMap {
   'catalog.get': { payload: undefined; result: CatalogView }
-  'catalog.model.get': {
-    payload: { provider: string; model: string }
-    result: ModelCapabilitiesView
-  }
-  'skill.catalog': { payload: { agentPresetId: string }; result: SkillCatalogView }
-  'mcp.catalog': { payload: { agentPresetId: string }; result: McpCatalogView }
   'assistant.list': { payload: undefined; result: PageView<AssistantView> }
-  'assistant.get': { payload: { id: string }; result: AssistantView }
   'assistant.create': { payload: CreateAssistantInput; result: AssistantView }
   'assistant.update': { payload: { id: string; value: UpdateAssistantInput }; result: AssistantView }
-  'assistant.clone': { payload: { id: string; name?: string }; result: AssistantView }
   'assistant.delete': { payload: { id: string }; result: null }
   'team.list': { payload: undefined; result: PageView<TeamView> }
-  'team.get': { payload: { id: string }; result: TeamView }
   'team.createDraft': { payload: CreateTeamDraftInput; result: TeamView }
-  'team.clone': { payload: CloneTeamInput & { teamId: string }; result: TeamView }
   'team.start': { payload: { id: string }; result: TeamView }
   'team.addMember': { payload: { teamId: string; value: AddTeamMemberInput }; result: TeamView }
   'team.removeMember': { payload: { teamId: string; slotId: string }; result: TeamView }
@@ -236,10 +189,6 @@ export interface AgentTeamRequestMap {
   }
   'team.member.setPermissionPreset': {
     payload: { teamId: string; slotId: string; permissionPresetId: string }
-    result: TeamView
-  }
-  'team.member.setReasoningEffort': {
-    payload: { teamId: string; slotId: string; reasoningEffort?: string }
     result: TeamView
   }
   'team.dissolve': { payload: { teamId: string; confirmation: string }; result: null }

@@ -13,7 +13,6 @@ interface TeamToolHandlers {
     title: string
     description?: string
     ownerSlotId?: string
-    fileScopes?: string[]
   }) => Promise<{ taskId: string; status: string; deliveryState?: 'queued' | 'delivered' }>
   updateTask: (input: {
     taskId: string
@@ -53,7 +52,6 @@ export function registerTeamTools(
       title: { type: 'string', required: true },
       description: { type: 'string' },
       ownerSlotId: { type: 'string', description: 'Current member slot id to assign.' },
-      fileScopes: { type: 'array', items: { type: 'string' }, description: 'Project-relative file scopes.' },
     },
     output: {
       schema: {

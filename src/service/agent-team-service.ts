@@ -1,13 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
-import { isModelInvocable, isSkillName, isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Config } from '../config.js'
 import { AgentTeamError } from '../domain/errors.js'
-import { isMcpServerName, mcpServerFromToolName } from '../domain/mcp.js'
 import {
-  createAssistantInputSchema,
   addTeamMemberInputSchema,
-  cloneTeamInputSchema,
+  createAssistantInputSchema,
   createTeamDraftInputSchema,
   updateAssistantInputSchema,
 } from '../domain/schemas.js'
@@ -15,11 +12,9 @@ import {
   snapshotAssistant,
   type AddTeamMemberInput,
   type AssistantTemplate,
-  type CloneTeamInput,
   type CreateAssistantInput,
   type CreateTeamDraftInput,
   type Page,
-  type TeamActivity,
   type TeamAggregate,
   type TeamMemberSlot,
   type TeamMessage,
@@ -57,34 +52,6 @@ export interface CatalogSnapshot {
   models: Record<string, Array<{ id: string; name: string; description?: string }>>
   agentPresets: Array<{ id: string; name: string; description?: string; broken?: string }>
   permissionPresets: Array<ReturnType<Context['permissionPresets']['optionOf']>>
-}
-
-export interface SkillCatalogSnapshot {
-  agentPresetId: string
-  skills: Array<{
-    name: string
-    description: string
-    source: string
-    modelInvocable: boolean
-    userInvocable: boolean
-  }>
-}
-
-export interface ModelCapabilitiesSnapshot {
-  provider: string
-  model: string
-  reasoning?: {
-    efforts: Array<{ id: string; name: string; description?: string }>
-    defaultEffort?: string
-  }
-}
-
-export interface McpCatalogSnapshot {
-  agentPresetId: string
-  servers: Array<{
-    name: string
-    tools: Array<{ name: string; description: string }>
-  }>
 }
 
 const PERMISSION_PRESET_LABELS: Readonly<Record<string, string>> = {
@@ -150,103 +117,6 @@ export class AgentTeamService extends Service {
     }
   }
 
-  async modelCapabilities(providerValue: string, modelValue: string): Promise<ModelCapabilitiesSnapshot> {
-    const provider = providerValue.trim()
-    const model = modelValue.trim()
-    let info: Awaited<ReturnType<Context['llm']['resolveModelInfo']>>
-    try {
-      info = await this.ctx.llm.resolveModelInfo(provider, model)
-    } catch (error) {
-      throw new AgentTeamError(
-        'MODEL_REFERENCE_INVALID',
-        `Cannot resolve model '${provider}/${model}'`,
-        undefined,
-        { cause: error },
-      )
-    }
-    return {
-      provider,
-      model,
-      ...(info.reasoning === undefined
-        ? {}
-        : {
-            reasoning: {
-              efforts: info.reasoning.efforts.map(effort => ({
-                id: String(effort.id),
-                name: effort.name,
-                ...(effort.description === undefined ? {} : { description: effort.description }),
-              })),
-              ...(info.reasoning.defaultEffort === undefined
-                ? {}
-                : { defaultEffort: String(info.reasoning.defaultEffort) }),
-            },
-          }),
-    }
-  }
-
-  async skillCatalog(agentPresetId: string): Promise<SkillCatalogSnapshot> {
-    try {
-      await this.ctx.agentPresets.resolve(agentPresetId)
-      const scope = await this.ctx.agentPresets.standingKeyFor(agentPresetId)
-      if (this.ctx.tools.get('skill', scope) === undefined) {
-        return { agentPresetId, skills: [] }
-      }
-      const skills = await this.ctx.skills.list({ scope })
-      return {
-        agentPresetId,
-        skills: skills.filter(skill => isModelInvocable(skill) || isUserInvocable(skill)).map(skill => ({
-          name: skill.name,
-          description: skill.description,
-          source: skill.source,
-          modelInvocable: isModelInvocable(skill),
-          userInvocable: isUserInvocable(skill),
-        })),
-      }
-    } catch (error) {
-      if (error instanceof AgentTeamError) throw error
-      throw new AgentTeamError(
-        'PRESET_REFERENCE_INVALID',
-        `Cannot read Skills for agent preset '${agentPresetId}'`,
-        undefined,
-        { cause: error },
-      )
-    }
-  }
-
-  async mcpCatalog(agentPresetId: string): Promise<McpCatalogSnapshot> {
-    try {
-      await this.ctx.agentPresets.resolve(agentPresetId)
-      const scope = await this.ctx.agentPresets.standingKeyFor(agentPresetId)
-      const servers = new Map<string, Array<{ name: string; description: string }>>()
-      for (const tool of this.ctx.tools.schemas(scope)) {
-        const serverName = mcpServerFromToolName(tool.name)
-        if (serverName === undefined) continue
-        const entries = servers.get(serverName) ?? []
-        entries.push({ name: tool.name, description: tool.description })
-        servers.set(serverName, entries)
-      }
-      return {
-        agentPresetId,
-        servers: [...servers.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, tools]) => ({
-          name,
-          tools: tools.sort((left, right) => left.name.localeCompare(right.name)),
-        })),
-      }
-    } catch (error) {
-      if (error instanceof AgentTeamError) throw error
-      throw new AgentTeamError(
-        'PRESET_REFERENCE_INVALID',
-        `Cannot read MCP Servers for agent preset '${agentPresetId}'`,
-        undefined,
-        { cause: error },
-      )
-    }
-  }
-
-  getAssistant(id: string): AssistantTemplate {
-    return requireAssistant(this.store, id)
-  }
-
   listAssistants(): Page<AssistantTemplate> {
     const items = this.store.listAssistants()
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
@@ -265,7 +135,6 @@ export class AgentTeamService extends Service {
       updatedAt: now,
     }
     await this.store.putAssistant(assistant)
-    await this.activity('assistant.created', assistant.id, assistant.revision, `Assistant ${assistant.name} created`)
     this.publish('assistant', assistant.id, assistant.revision, 'assistant.created')
     return assistant
   }
@@ -295,17 +164,8 @@ export class AgentTeamService extends Service {
       revision: value.revision + 1,
       updatedAt: new Date().toISOString(),
     }))
-    await this.activity('assistant.updated', next.id, next.revision, `Assistant ${next.name} updated`)
     this.publish('assistant', next.id, next.revision, 'assistant.updated')
     return next
-  }
-
-  async cloneAssistant(id: string, name?: string): Promise<AssistantTemplate> {
-    const source = requireAssistant(this.store, id)
-    return this.createAssistant({
-      ...assistantInputOf(source),
-      name: name?.trim() || `${source.name} Copy`,
-    })
   }
 
   async deleteAssistant(id: string): Promise<void> {
@@ -321,7 +181,6 @@ export class AgentTeamService extends Service {
       )
     }
     await this.store.deleteAssistant(id)
-    await this.activity('assistant.deleted', id, assistant.revision + 1, `Assistant ${assistant.name} deleted`)
     this.publish('assistant', id, assistant.revision + 1, 'assistant.deleted')
   }
 
@@ -343,19 +202,18 @@ export class AgentTeamService extends Service {
     const workspace = await this.defaultWorkspace()
 
     const now = new Date().toISOString()
-    const members: Record<string, TeamMemberSlot> = {}
+    const slots: Record<string, TeamMemberSlot> = {}
     let leaderSlotId = ''
     for (const item of input.members) {
       const assistant = requireAssistant(this.store, item.assistantId)
       const slotId = randomUUID()
-      members[slotId] = {
+      slots[slotId] = {
         id: slotId,
         assistantId: assistant.id,
         displayName: assistant.name,
         role: item.role,
         assistantSnapshot: snapshotAssistant(assistant),
         permissionPresetId: assistant.permissionPresetId,
-        ...(assistant.reasoningEffort === undefined ? {} : { reasoningEffort: assistant.reasoningEffort }),
         sessionId: `agent-team:${randomUUID()}`,
         desiredState: 'offline',
         lastRuntimeState: 'offline',
@@ -373,58 +231,16 @@ export class AgentTeamService extends Service {
       leaderSlotId,
       state: 'draft',
       directMemberChat: input.directMemberChat ?? this.config.directMemberChatDefault,
-      members,
+      members: slots,
       retiredSessions: {},
       tasks: {},
-      leases: {},
       outbox: {},
       revision: 1,
       createdAt: now,
       updatedAt: now,
     }
     await this.store.putTeam(team)
-    await this.activity('team.created', team.id, team.revision, `Team ${team.name} draft created`)
     this.publish('team', team.id, team.revision, 'team.created')
-    return team
-  }
-
-  async cloneTeam(sourceTeamId: string, raw: CloneTeamInput): Promise<TeamAggregate> {
-    const input = cloneTeamInputSchema.parse(raw)
-    const source = requireTeam(this.store, sourceTeamId)
-
-    const now = new Date().toISOString()
-    const members: Record<string, TeamMemberSlot> = {}
-    let leaderSlotId = ''
-    for (const sourceMember of Object.values(source.members)) {
-      const member = cloneMemberSlot(sourceMember, now)
-      members[member.id] = member
-      if (sourceMember.id === source.leaderSlotId) leaderSlotId = member.id
-    }
-    if (leaderSlotId === '') {
-      throw new AgentTeamError('TEAM_INVALID_LEADER', 'Source team has no valid leader')
-    }
-
-    const team: TeamAggregate = {
-      schemaVersion: 1,
-      id: randomUUID(),
-      name: input.name.trim(),
-      workspaceId: source.workspaceId,
-      workspacePath: source.workspacePath,
-      leaderSlotId,
-      state: 'draft',
-      directMemberChat: source.directMemberChat,
-      members,
-      retiredSessions: {},
-      tasks: {},
-      leases: {},
-      outbox: {},
-      revision: 1,
-      createdAt: now,
-      updatedAt: now,
-    }
-    await this.store.putTeam(team)
-    await this.activity('team.cloned', team.id, team.revision, `Team ${team.name} cloned from ${source.name}`)
-    this.publish('team', team.id, team.revision, 'team.cloned')
     return team
   }
 
@@ -452,7 +268,6 @@ export class AgentTeamService extends Service {
       revision: team.revision + 1,
       updatedAt: new Date().toISOString(),
     }))
-    await this.activity('team.leader_changed', teamId, next.revision, 'Team leader changed')
     this.publish('team', teamId, next.revision, 'team.leader_changed')
     return next
   }
@@ -470,16 +285,14 @@ export class AgentTeamService extends Service {
       throw new AgentTeamError('TEAM_NOT_ACTIVE', `Cannot add a member while team is '${team.state}'`)
     }
     const assistant = requireAssistant(this.store, input.assistantId)
-    const displayName = assistant.name
     const now = new Date().toISOString()
-    const member = createMemberSlot(assistant, displayName, 'member', now, team.state === 'draft' ? 'offline' : 'online')
+    const member = createMemberSlot(assistant, assistant.name, 'member', now, team.state === 'draft' ? 'offline' : 'online')
     const next = await this.store.updateTeam(teamId, current => ({
       ...current,
       members: { ...current.members, [member.id]: member },
       revision: current.revision + 1,
       updatedAt: now,
     }))
-    await this.activity('team.member_added', teamId, next.revision, `Member ${displayName} added`)
     this.publish('team', teamId, next.revision, 'team.member_added')
     if (next.state !== 'draft') return this.requireRuntime().activateMember(teamId, member.id)
     return next
@@ -505,7 +318,6 @@ export class AgentTeamService extends Service {
         delete members[slotId]
         return { ...current, members, revision: current.revision + 1, updatedAt: new Date().toISOString() }
       })
-      await this.activity('team.member_removed', teamId, next.revision, `Member ${member.displayName} removed`)
       this.publish('team', teamId, next.revision, 'team.member_removed')
       return next
     }
@@ -592,56 +404,10 @@ export class AgentTeamService extends Service {
         revision: current.revision + 1,
         updatedAt: new Date().toISOString(),
       }))
-      await this.activity(
-        'team.member_permission_changed',
-        teamId,
-        next.revision,
-        `Member ${member.displayName} permission changed to ${permissionPresetId}`,
-      )
       this.publish('team', teamId, next.revision, 'team.member_permission_changed')
       return next
     }
     return this.requireRuntime().setMemberPermissionPreset(teamId, slotId, permissionPresetId)
-  }
-
-  async setMemberReasoningEffort(
-    teamId: string,
-    slotId: string,
-    rawReasoningEffort: string | undefined,
-    options: MutationOptions = {},
-  ): Promise<TeamAggregate> {
-    const reasoningEffort = rawReasoningEffort?.trim() || undefined
-    const team = requireTeam(this.store, teamId)
-    assertTeamMutable(team)
-    assertRevision('team', team.revision, options.expectedRevision)
-    const member = team.members[slotId]
-    if (member === undefined) throw new AgentTeamError('MEMBER_NOT_FOUND', `Unknown member '${slotId}'`)
-    await this.validateReasoningEffort(
-      member.assistantSnapshot.provider,
-      member.assistantSnapshot.model,
-      reasoningEffort,
-    )
-    if (member.reasoningEffort === reasoningEffort) return team
-    if (team.state === 'draft') {
-      const next = await this.store.updateTeam(teamId, current => ({
-        ...current,
-        members: Object.fromEntries(Object.entries(current.members).map(([id, currentMember]) => [
-          id,
-          id === slotId ? withReasoningEffort(currentMember, reasoningEffort) : currentMember,
-        ])),
-        revision: current.revision + 1,
-        updatedAt: new Date().toISOString(),
-      }))
-      await this.activity(
-        'team.member_reasoning_changed',
-        teamId,
-        next.revision,
-        `Member ${member.displayName} reasoning changed to ${reasoningEffort ?? 'model default'}`,
-      )
-      this.publish('team', teamId, next.revision, 'team.member_reasoning_changed')
-      return next
-    }
-    return this.requireRuntime().setMemberReasoningEffort(teamId, slotId, reasoningEffort)
   }
 
   publishConversation(teamId: string, revision: number, conversation?: MemberConversationView): void {
@@ -658,8 +424,9 @@ export class AgentTeamService extends Service {
     teamId: string,
     update: (team: TeamAggregate) => TeamAggregate,
     kind: string,
-    summary: string,
+    summary?: string,
   ): Promise<TeamAggregate> {
+    void summary
     const next = await this.store.updateTeam(teamId, current => {
       const candidate = update(current)
       return {
@@ -668,7 +435,6 @@ export class AgentTeamService extends Service {
         updatedAt: new Date().toISOString(),
       }
     })
-    await this.activity(kind, teamId, next.revision, summary)
     this.publish('team', teamId, next.revision, kind)
     return next
   }
@@ -702,7 +468,6 @@ export class AgentTeamService extends Service {
   async deleteTeamRecords(teamId: string): Promise<void> {
     const team = requireTeam(this.store, teamId)
     await Promise.all(this.store.listMessages(teamId).map(message => this.store.deleteMessage(message.id)))
-    await Promise.all(this.store.listActivities(teamId).map(activity => this.store.deleteActivity(activity.id)))
     await this.store.deleteTeam(teamId)
     this.publish('team', teamId, team.revision + 1, 'team.deleted')
   }
@@ -715,15 +480,6 @@ export class AgentTeamService extends Service {
   }
 
   private async validateAssistantReferences(input: CreateAssistantInput): Promise<void> {
-    const invalidSkill = input.skillAllowlist.find(name => !isSkillName(name))
-    if (invalidSkill !== undefined) {
-      throw new AgentTeamError('SKILL_REFERENCE_INVALID', `Invalid Skill name '${invalidSkill}'`)
-    }
-    const invalidMcpServer = input.mcpServers.find(name => !isMcpServerName(name))
-    if (invalidMcpServer !== undefined) {
-      throw new AgentTeamError('MCP_REFERENCE_INVALID', `Invalid MCP Server name '${invalidMcpServer}'`)
-    }
-    await this.validateReasoningEffort(input.provider, input.model, input.reasoningEffort)
     try {
       await this.ctx.agentPresets.resolve(input.agentPresetId)
     } catch (error) {
@@ -739,56 +495,6 @@ export class AgentTeamService extends Service {
         'PERMISSION_PRESET_INVALID',
         `Unknown permission preset '${input.permissionPresetId}'`,
       )
-    }
-    if (input.mcpServers.length > 0) {
-      const catalog = await this.mcpCatalog(input.agentPresetId)
-      const available = new Set(catalog.servers.map(server => server.name))
-      const missing = input.mcpServers.filter(name => !available.has(name))
-      if (missing.length > 0) {
-        throw new AgentTeamError(
-          'MCP_REFERENCE_INVALID',
-          `Agent Preset '${input.agentPresetId}' cannot access MCP Server(s): ${missing.join(', ')}`,
-          { missing },
-        )
-      }
-    }
-  }
-
-  private async validateReasoningEffort(
-    provider: string,
-    model: string,
-    reasoningEffort: string | undefined,
-  ): Promise<void> {
-    const capabilities = await this.modelCapabilities(provider, model)
-    if (reasoningEffort === undefined) return
-    const supported = capabilities.reasoning?.efforts.some(effort => effort.id === reasoningEffort) ?? false
-    if (!supported) {
-      throw new AgentTeamError(
-        'MODEL_REFERENCE_INVALID',
-        `Model '${provider}/${model}' does not support reasoning effort '${reasoningEffort}'`,
-        {
-          reasoningEffort,
-          supportedEfforts: capabilities.reasoning?.efforts.map(effort => effort.id) ?? [],
-        },
-      )
-    }
-  }
-
-  private async activity(kind: string, entityId: string, revision: number, summary: string): Promise<void> {
-    const activity: TeamActivity = {
-      schemaVersion: 1,
-      id: randomUUID(),
-      teamId: kind.startsWith('team.') ? entityId : 'assistant-library',
-      kind,
-      entityId,
-      summary,
-      revision,
-      createdAt: new Date().toISOString(),
-    }
-    try {
-      await this.store.putActivity(activity)
-    } catch (error) {
-      this.ctx.logger.warn('agent-team: activity write failed after primary mutation', error)
     }
   }
 
@@ -850,15 +556,11 @@ function assistantInputOf(assistant: AssistantTemplate): CreateAssistantInput {
   return {
     name: assistant.name,
     ...(assistant.description === undefined ? {} : { description: assistant.description }),
-    ...(assistant.icon === undefined ? {} : { icon: assistant.icon }),
     instructions: assistant.instructions,
     provider: assistant.provider,
     model: assistant.model,
-    ...(assistant.reasoningEffort === undefined ? {} : { reasoningEffort: assistant.reasoningEffort }),
     agentPresetId: assistant.agentPresetId,
     permissionPresetId: assistant.permissionPresetId,
-    skillAllowlist: [...assistant.skillAllowlist],
-    mcpServers: [...assistant.mcpServers],
   }
 }
 
@@ -868,24 +570,9 @@ function normalizeAssistantInput(input: CreateAssistantInput): CreateAssistantIn
     name: input.name.trim(),
     provider: input.provider.trim(),
     model: input.model.trim(),
-    ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort.trim() }),
     agentPresetId: input.agentPresetId.trim(),
     permissionPresetId: input.permissionPresetId.trim(),
-    skillAllowlist: unique(input.skillAllowlist),
-    mcpServers: unique(input.mcpServers),
   }
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values.map(value => value.trim()).filter(Boolean))]
-}
-
-function withReasoningEffort(
-  member: TeamMemberSlot,
-  reasoningEffort: string | undefined,
-): TeamMemberSlot {
-  const { reasoningEffort: _current, ...rest } = member
-  return reasoningEffort === undefined ? rest : { ...rest, reasoningEffort }
 }
 
 function createMemberSlot(
@@ -903,31 +590,9 @@ function createMemberSlot(
     role,
     assistantSnapshot: snapshotAssistant(assistant),
     permissionPresetId: assistant.permissionPresetId,
-    ...(assistant.reasoningEffort === undefined ? {} : { reasoningEffort: assistant.reasoningEffort }),
     sessionId: `agent-team:${randomUUID()}`,
     desiredState,
     lastRuntimeState: desiredState === 'online' ? 'starting' : 'offline',
-    joinedAt: now,
-  }
-}
-
-function cloneMemberSlot(source: TeamMemberSlot, now: string): TeamMemberSlot {
-  const slotId = randomUUID()
-  return {
-    id: slotId,
-    assistantId: source.assistantId,
-    displayName: source.displayName,
-    role: source.role,
-    assistantSnapshot: {
-      ...source.assistantSnapshot,
-      skillAllowlist: [...source.assistantSnapshot.skillAllowlist],
-      mcpServers: [...source.assistantSnapshot.mcpServers],
-    },
-    permissionPresetId: source.permissionPresetId,
-    ...(source.reasoningEffort === undefined ? {} : { reasoningEffort: source.reasoningEffort }),
-    sessionId: `agent-team:${randomUUID()}`,
-    desiredState: 'offline',
-    lastRuntimeState: 'offline',
     joinedAt: now,
   }
 }

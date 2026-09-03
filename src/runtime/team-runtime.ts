@@ -7,14 +7,12 @@ import {
   type AgentHandle,
   type ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import { isModelInvocable, isUserInvocable } from '@deepseek-ai/dsh-skill'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { Config } from '../config.js'
 import { AgentTeamError } from '../domain/errors.js'
-import { mcpServerFromToolName } from '../domain/mcp.js'
 import type {
   TeamAggregate,
   TeamMemberSlot,
@@ -27,7 +25,6 @@ import type {
   TeamWorkbenchView,
 } from '../transport/contracts.js'
 import { projectConversation } from './conversation-projector.js'
-import { registerScopedSkillProvider } from './scoped-skills.js'
 import { TeamCommandHandler } from './team-command-handler.js'
 import { TeamInteractionBridge } from './team-interaction-bridge.js'
 import { TeamMessageDispatcher } from './team-message-dispatcher.js'
@@ -194,49 +191,6 @@ export class TeamRuntime {
         )
       } catch (error) {
         this.ctx.permissionPresets.set(owned.handle.agent.session, previous)
-        throw error
-      }
-    })
-  }
-
-  setMemberReasoningEffort(
-    teamId: string,
-    slotId: string,
-    reasoningEffort: string | undefined,
-  ): Promise<TeamAggregate> {
-    return this.exclusive(teamId, async () => {
-      const team = this.service.getTeam(teamId)
-      if (team.state !== 'active' && team.state !== 'error') {
-        throw new AgentTeamError(
-          'TEAM_NOT_ACTIVE',
-          `Cannot change member reasoning while team is '${team.state}'`,
-        )
-      }
-      const member = team.members[slotId]
-      if (member === undefined) throw new AgentTeamError('MEMBER_NOT_FOUND', `Unknown member '${slotId}'`)
-      const owned = this.requireOwned(member.sessionId)
-      const previous = owned.modelSelection.current
-      owned.modelSelection.current = {
-        provider: member.assistantSnapshot.provider,
-        model: member.assistantSnapshot.model,
-        ...(reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(reasoningEffort) }),
-      }
-      try {
-        return await this.service.updateRuntimeTeam(
-          teamId,
-          current => ({
-            ...current,
-            members: mapMembers(current, currentMember => {
-              if (currentMember.id !== slotId) return currentMember
-              const { reasoningEffort: _previous, ...rest } = currentMember
-              return reasoningEffort === undefined ? rest : { ...rest, reasoningEffort }
-            }),
-          }),
-          'team.member_reasoning_changed',
-          `Member ${member.displayName} reasoning changed to ${reasoningEffort ?? 'model default'}`,
-        )
-      } catch (error) {
-        owned.modelSelection.current = previous
         throw error
       }
     })
@@ -432,7 +386,6 @@ export class TeamRuntime {
           ...current,
           state: shouldRestart ? 'starting' : 'draft',
           tasks: {},
-          leases: {},
           outbox: {},
           retiredSessions: current.state === 'draft'
             ? current.retiredSessions
@@ -737,9 +690,6 @@ export class TeamRuntime {
         current: {
           provider: member.assistantSnapshot.provider,
           model: member.assistantSnapshot.model,
-          ...(member.reasoningEffort === undefined
-            ? {}
-            : { reasoningEffort: ReasoningEffortId(member.reasoningEffort) }),
         },
         assembled: undefined,
       }
@@ -779,92 +729,6 @@ export class TeamRuntime {
         })
         const agent = agentCtx.agent
         if (agent === undefined) throw new Error('Harness did not bind the unpublished agent context')
-        const selectedMcpServers = new Set(member.assistantSnapshot.mcpServers)
-        const mcpTools = agentCtx.tools.schemas(agent).flatMap(tool => {
-          const serverName = mcpServerFromToolName(tool.name)
-          return serverName === undefined ? [] : [{ name: tool.name, serverName }]
-        })
-        const availableMcpServers = new Set(mcpTools.map(tool => tool.serverName))
-        const missingMcpServers = [...selectedMcpServers]
-          .filter(serverName => !availableMcpServers.has(serverName))
-        if (missingMcpServers.length > 0) {
-          throw new AgentTeamError(
-            'MCP_REFERENCE_INVALID',
-            `Member '${member.displayName}' cannot access selected MCP Server(s): ${missingMcpServers.join(', ')}`,
-            { memberId: member.id, missing: missingMcpServers },
-          )
-        }
-        const deniedMcpTools = mcpTools
-          .filter(tool => !selectedMcpServers.has(tool.serverName))
-          .map(tool => tool.name)
-        if (deniedMcpTools.length > 0) agentCtx.tools.restrict({ deny: deniedMcpTools })
-        agentCtx.tools.guard(execution => {
-          const serverName = mcpServerFromToolName(execution.name)
-          return serverName === undefined || selectedMcpServers.has(serverName)
-            ? undefined
-            : 'This MCP Server is not selected for the assistant.'
-        })
-        const selectedSkills = new Set(member.assistantSnapshot.skillAllowlist)
-        const skills = await this.ctx.skills.list({
-          cwd: team.workspacePath,
-          scope: agent,
-        })
-        const available = new Set(skills
-          .filter(skill => isModelInvocable(skill) || isUserInvocable(skill))
-          .map(skill => skill.name))
-        const missing = [...selectedSkills].filter(name => !available.has(name))
-        if (missing.length > 0) {
-          throw new AgentTeamError(
-            'SKILL_REFERENCE_INVALID',
-            `Member '${member.displayName}' cannot access selected Skill(s): ${missing.join(', ')}`,
-            { memberId: member.id, missing },
-          )
-        }
-        if (selectedSkills.size > 0 && agentCtx.tools.get('skill', agent) === undefined) {
-          throw new AgentTeamError(
-            'SKILL_REFERENCE_INVALID',
-            `Member '${member.displayName}' selected Skills, but its Agent Preset does not expose the skill loader`,
-            { memberId: member.id },
-          )
-        }
-        const presetScope = await this.ctx.agentPresets.standingKeyFor(
-          member.assistantSnapshot.agentPresetId,
-        )
-        const skillSelectionProvider = `agent-team-selection-${member.id}`
-        await registerScopedSkillProvider(agentCtx, () => ({
-          name: skillSelectionProvider,
-          list: async options => {
-            const inherited = await this.ctx.skills.list({
-              cwd: options.cwd,
-              signal: options.signal,
-              scope: presetScope,
-            })
-            return inherited.filter(skill => !selectedSkills.has(skill.name)).map(skill => ({
-              name: skill.name,
-              description: skill.description,
-              invocation: { modelInvocable: false, userInvocable: false },
-              source: 'runtime',
-              provider: skillSelectionProvider,
-              rank: 0,
-              locator: skill.name,
-            }))
-          },
-          get: async candidate => ({
-            name: candidate.name,
-            description: candidate.description,
-            invocation: { modelInvocable: false, userInvocable: false },
-            source: 'runtime',
-            provider: skillSelectionProvider,
-            content: '',
-          }),
-        }))
-        agentCtx.tools.guard(execution => {
-          if (execution.name !== 'skill') return undefined
-          const name = skillNameFromArguments(execution.arguments)
-          return name !== undefined && selectedSkills.has(name)
-            ? undefined
-            : 'This Skill is not selected for the assistant.'
-        })
         this.ctx.permissionPresets.set(
           agent.session,
           member.permissionPresetId,
@@ -1007,11 +871,6 @@ function mapMembers(
   map: (member: TeamMemberSlot) => TeamMemberSlot,
 ): TeamAggregate['members'] {
   return Object.fromEntries(Object.entries(team.members).map(([id, member]) => [id, map(member)]))
-}
-
-function skillNameFromArguments(value: unknown): string | undefined {
-  if (typeof value !== 'object' || value === null || !('name' in value)) return undefined
-  return typeof value.name === 'string' ? value.name : undefined
 }
 
 async function mapConcurrent<T>(

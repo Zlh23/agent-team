@@ -10,11 +10,8 @@ export const assistantSnapshotSchema = z.object({
   instructions: z.string(),
   provider: nonEmpty,
   model: nonEmpty,
-  reasoningEffort: nonEmpty.optional(),
   agentPresetId: nonEmpty,
   permissionPresetId: nonEmpty,
-  skillAllowlist: z.array(nonEmpty),
-  mcpServers: z.array(nonEmpty),
 }).strict()
 
 export const assistantTemplateSchema = z.object({
@@ -22,15 +19,11 @@ export const assistantTemplateSchema = z.object({
   id: nonEmpty,
   name: nonEmpty,
   description: z.string().optional(),
-  icon: z.string().optional(),
   instructions: z.string(),
   provider: nonEmpty,
   model: nonEmpty,
-  reasoningEffort: nonEmpty.optional(),
   agentPresetId: nonEmpty,
   permissionPresetId: nonEmpty,
-  skillAllowlist: z.array(nonEmpty),
-  mcpServers: z.array(nonEmpty),
   revision: z.int().positive(),
   createdAt: isoDate,
   updatedAt: isoDate,
@@ -52,7 +45,6 @@ export const teamMemberSlotSchema = z.object({
   role: z.enum(['leader', 'member']),
   assistantSnapshot: assistantSnapshotSchema,
   permissionPresetId: nonEmpty,
-  reasoningEffort: nonEmpty.optional(),
   sessionId: nonEmpty,
   desiredState: z.enum(['online', 'offline', 'removing']),
   lastRuntimeState: memberRuntimeStateSchema,
@@ -74,21 +66,11 @@ export const teamTaskSchema = z.object({
   ownerSlotId: nonEmpty.optional(),
   createdBySlotId: nonEmpty.optional(),
   dependencyIds: z.array(nonEmpty),
-  fileScopes: z.array(nonEmpty),
   result: z.string().optional(),
   error: z.string().optional(),
   revision: z.int().positive(),
   createdAt: isoDate,
   updatedAt: isoDate,
-}).strict()
-
-export const fileScopeLeaseSchema = z.object({
-  id: nonEmpty,
-  slotId: nonEmpty,
-  taskId: nonEmpty,
-  path: nonEmpty,
-  acquiredAt: isoDate,
-  expiresAt: isoDate.optional(),
 }).strict()
 
 export const teamMessageSchema = z.object({
@@ -131,36 +113,20 @@ export const teamAggregateSchema = z.object({
   members: z.record(z.string(), teamMemberSlotSchema),
   retiredSessions: z.record(z.string(), retiredMemberSessionSchema),
   tasks: z.record(z.string(), teamTaskSchema),
-  leases: z.record(z.string(), fileScopeLeaseSchema),
   outbox: z.record(z.string(), teamMessageSchema),
   revision: z.int().positive(),
   createdAt: isoDate,
   updatedAt: isoDate,
 }).strict()
 
-export const teamActivitySchema = z.object({
-  schemaVersion: z.literal(1),
-  id: nonEmpty,
-  teamId: nonEmpty,
-  kind: nonEmpty,
-  entityId: nonEmpty.optional(),
-  summary: z.string(),
-  revision: z.int().nonnegative(),
-  createdAt: isoDate,
-}).strict()
-
 export const createAssistantInputSchema = assistantTemplateSchema.pick({
   name: true,
   description: true,
-  icon: true,
   instructions: true,
   provider: true,
   model: true,
-  reasoningEffort: true,
   agentPresetId: true,
   permissionPresetId: true,
-  skillAllowlist: true,
-  mcpServers: true,
 })
 
 export const updateAssistantInputSchema = createAssistantInputSchema.partial().strict()
@@ -176,8 +142,4 @@ export const createTeamDraftInputSchema = z.object({
   name: nonEmpty,
   directMemberChat: z.boolean().optional(),
   members: z.array(createTeamMemberInputSchema).min(1),
-}).strict()
-
-export const cloneTeamInputSchema = z.object({
-  name: nonEmpty,
 }).strict()

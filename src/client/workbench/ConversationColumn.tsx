@@ -1,7 +1,6 @@
 import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
-  IconCloseOutline16,
   IconSendOutline16,
   IconStopFill16,
   MarkdownText,
@@ -15,32 +14,13 @@ import type {
   TeamView,
 } from '../../transport/contracts.js'
 import { callAgentTeam } from '../api.js'
-import {
-  composerTriggerAt,
-  matchingUserSkills,
-  replaceComposerTrigger,
-  scrollTopForActiveOption,
-  type ComposerTrigger,
-} from '../composer-triggers.js'
 import css from './ConversationColumn.module.css'
 import { mergeConversationNodes } from '../conversation-nodes.js'
 import { CrownIcon } from '../icons/CrownIcon.js'
 import { DeepThinkIcon } from '../icons/DeepThinkIcon.js'
 import { shouldSubmitComposer } from '../keyboard.js'
 import { memberStatusLabel, PERMISSION_LABELS } from '../labels.js'
-import {
-  defaultReasoningLabel,
-  reasoningEffortLabel,
-  useModelCapabilities,
-} from '../model-reasoning.js'
 import { PendingInteractionCard } from './PendingInteractionCard.js'
-
-interface ComposerCandidate {
-  id: string
-  label: string
-  description: string
-  replacement: string
-}
 
 export function ConversationColumn({
   team,
@@ -49,8 +29,6 @@ export function ConversationColumn({
   permissionPresets,
   onSent,
   onTeamChanged,
-  expanded,
-  onExpandedChange,
 }: {
   team: TeamView
   member: TeamView['members'][string]
@@ -58,30 +36,19 @@ export function ConversationColumn({
   permissionPresets: CatalogView['permissionPresets']
   onSent: () => Promise<void>
   onTeamChanged: () => Promise<void>
-  expanded: boolean
-  onExpandedChange: (expanded: boolean) => void
 }): JSX.Element {
   const [content, setContent] = useState('')
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [changingPermission, setChangingPermission] = useState(false)
-  const [changingReasoning, setChangingReasoning] = useState(false)
   const [permissionPresetId, setPermissionPresetId] = useState(member.permissionPresetId)
-  const [reasoningEffort, setReasoningEffort] = useState(member.reasoningEffort ?? '')
   const [error, setError] = useState<string>()
   const [pendingMessages, setPendingMessages] = useState<ConversationNode[]>([])
-  const [composerTrigger, setComposerTrigger] = useState<ComposerTrigger>()
-  const [composerCandidates, setComposerCandidates] = useState<ComposerCandidate[]>([])
-  const [composerCandidateIndex, setComposerCandidateIndex] = useState(0)
-  const [composerCandidatesLoading, setComposerCandidatesLoading] = useState(false)
-  const [composerCandidatesError, setComposerCandidatesError] = useState<string>()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const composerTriggerOptionsRef = useRef<HTMLDivElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
   const composing = useRef(false)
   const sendInFlight = useRef(false)
-  const composerCandidateGeneration = useRef(0)
   const canChat = team.state === 'active' && (member.role === 'leader' || team.directMemberChat)
   const running = conversation?.status === 'running'
   const visibleNodes = mergeConversationNodes(conversation?.nodes ?? [], pendingMessages)
@@ -91,26 +58,10 @@ export function ConversationColumn({
     : pendingInteractions.length > 0
       ? '等待回答'
       : memberStatusLabel(conversation?.status ?? member.lastRuntimeState)
-  const modelCapabilities = useModelCapabilities(
-    member.assistantSnapshot.provider,
-    member.assistantSnapshot.model,
-  )
-  const defaultReasoningEffort = modelCapabilities.value?.reasoning?.defaultEffort
-  const reasoningModeLabel = reasoningEffort
-    ? reasoningEffortLabel(modelCapabilities.value, reasoningEffort)
-    : defaultReasoningEffort
-      ? reasoningEffortLabel(modelCapabilities.value, defaultReasoningEffort)
-      : '默认'
-  const skillNamesKey = member.assistantSnapshot.skillAllowlist.join('\u0000')
-  const composerMenuId = `agent-team-composer-menu-${member.id}`
 
   useEffect(() => {
     setPermissionPresetId(member.permissionPresetId)
   }, [member.permissionPresetId])
-
-  useEffect(() => {
-    setReasoningEffort(member.reasoningEffort ?? '')
-  }, [member.reasoningEffort])
 
   useEffect(() => {
     const committedIds = new Set(conversation?.nodes.map(node => node.id) ?? [])
@@ -129,74 +80,6 @@ export function ConversationColumn({
     return () => { cancelAnimationFrame(frame) }
   }, [conversation?.throughSeq, pendingInteractions.length, pendingMessages.length])
 
-  useEffect(() => {
-    const generation = ++composerCandidateGeneration.current
-    setComposerCandidateIndex(0)
-    setComposerCandidatesError(undefined)
-    if (composerTrigger === undefined) {
-      setComposerCandidates([])
-      setComposerCandidatesLoading(false)
-      return
-    }
-    const query = composerTrigger.query.toLocaleLowerCase()
-    setComposerCandidates([])
-    setComposerCandidatesLoading(true)
-    const timer = window.setTimeout(() => {
-      void callAgentTeam('skill.catalog', {
-        agentPresetId: member.assistantSnapshot.agentPresetId,
-      }).then(catalog => {
-        if (generation !== composerCandidateGeneration.current) return
-        const selected = new Set(member.assistantSnapshot.skillAllowlist)
-        const candidates = matchingUserSkills(catalog.skills, selected, query)
-          .map(skill => ({
-            id: `skill:${skill.name}`,
-            label: `/${skill.name}`,
-            description: skill.description,
-            replacement: `/${skill.name}`,
-          }))
-        setComposerCandidates(candidates)
-        setComposerCandidatesLoading(false)
-      }).catch(cause => {
-        if (generation !== composerCandidateGeneration.current) return
-        setComposerCandidates([])
-        setComposerCandidatesLoading(false)
-        setComposerCandidatesError(cause instanceof Error ? cause.message : String(cause))
-      })
-    }, 100)
-    return () => { window.clearTimeout(timer) }
-  }, [composerTrigger?.query, skillNamesKey, member.assistantSnapshot.agentPresetId])
-
-  useEffect(() => {
-    const container = composerTriggerOptionsRef.current
-    if (container === null || composerCandidates.length === 0) return
-    const active = container.querySelector<HTMLElement>('[aria-selected="true"]')
-    if (active === null) return
-    const viewport = container.getBoundingClientRect()
-    const option = active.getBoundingClientRect()
-    container.scrollTop = scrollTopForActiveOption({
-      viewportTop: viewport.top,
-      viewportBottom: viewport.bottom,
-      optionTop: option.top,
-      optionBottom: option.bottom,
-      scrollTop: container.scrollTop,
-    })
-  }, [composerCandidateIndex, composerCandidates.length])
-
-  function updateComposerTrigger(value: string, cursor: number | null): void {
-    setComposerTrigger(composerTriggerAt(value, cursor ?? value.length))
-  }
-
-  function acceptComposerCandidate(candidate: ComposerCandidate): void {
-    if (composerTrigger === undefined) return
-    const next = replaceComposerTrigger(content, composerTrigger, candidate.replacement)
-    setContent(next.value)
-    setComposerTrigger(undefined)
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus()
-      textareaRef.current?.setSelectionRange(next.cursor, next.cursor)
-    })
-  }
-
   async function send(event: FormEvent): Promise<void> {
     event.preventDefault()
     const message = content.trim()
@@ -212,7 +95,6 @@ export function ConversationColumn({
     sendInFlight.current = true
     setSending(true)
     setContent('')
-    setComposerTrigger(undefined)
     setPendingMessages(current => [...current, pending])
     stickToBottom.current = true
     try {
@@ -269,69 +151,22 @@ export function ConversationColumn({
     }
   }
 
-  async function changeReasoning(nextReasoningEffort: string): Promise<void> {
-    if (changingReasoning || nextReasoningEffort === reasoningEffort) return
-    const previous = reasoningEffort
-    setReasoningEffort(nextReasoningEffort)
-    setChangingReasoning(true)
-    try {
-      await callAgentTeam('team.member.setReasoningEffort', {
-        teamId: team.id,
-        slotId: member.id,
-        ...(nextReasoningEffort ? { reasoningEffort: nextReasoningEffort } : {}),
-      })
-      setError(undefined)
-      await onTeamChanged()
-    } catch (cause) {
-      setReasoningEffort(previous)
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setChangingReasoning(false)
-    }
-  }
-
   return (
-    <section
-      className={`${css.conversationColumn} ${expanded ? css.conversationColumnExpanded : ''}`}
-      aria-label={`${member.displayName} 对话`}
-      role={expanded ? 'dialog' : undefined}
-      aria-modal={expanded || undefined}
-    >
-      <header
-        className={css.columnHeader}
-        title={expanded ? undefined : '双击放大对话'}
-        onDoubleClick={() => { if (!expanded) onExpandedChange(true) }}
-      >
+    <section className={css.conversationColumn} aria-label={`${member.displayName} 对话`}>
+      <header className={css.columnHeader}>
         <div className={css.columnIdentity}>
           <span className={css.memberAvatar}>{member.displayName.slice(0, 1).toUpperCase()}</span>
           <div>
             <strong>{member.displayName} {member.role === 'leader' && <CrownIcon size={15} className={css.leaderCrown} title="Leader" />}</strong>
-            <div
-              className={css.columnModelMeta}
-              title={`${member.assistantSnapshot.provider} / ${member.assistantSnapshot.model} · 思考模式：${reasoningModeLabel}`}
-            >
+            <div className={css.columnModelMeta} title={`${member.assistantSnapshot.provider} / ${member.assistantSnapshot.model}`}>
               <span className={css.columnModelName}>
                 {member.assistantSnapshot.provider} / {member.assistantSnapshot.model}
               </span>
-              <span className={css.reasoningModeBadge}>{reasoningModeLabel}</span>
             </div>
           </div>
         </div>
         <div className={css.columnHeaderActions}>
           <span className={css.columnStatus}>{statusLabel}</span>
-          {expanded && (
-            <Tooltip label="关闭放大对话" side="bottom" delayMs={400}>
-              <button
-                type="button"
-                className={css.columnExpandClose}
-                aria-label="关闭放大对话"
-                onDoubleClick={event => { event.stopPropagation() }}
-                onClick={() => { onExpandedChange(false) }}
-              >
-                <IconCloseOutline16 size={16} />
-              </button>
-            </Tooltip>
-          )}
         </div>
       </header>
       <div
@@ -368,84 +203,13 @@ export function ConversationColumn({
           </>}
       </div>
       <form className={css.composer} onSubmit={(event) => { void send(event) }}>
-        {composerTrigger !== undefined && (
-          <div
-            id={composerMenuId}
-            className={css.composerTriggerMenu}
-            role="listbox"
-            aria-label="Skill 候选"
-          >
-            <div className={css.composerTriggerHeading}>
-              <strong>Skills</strong>
-              <span>↑↓ 选择 · Enter 插入 · Esc 关闭</span>
-            </div>
-            <div ref={composerTriggerOptionsRef} className={css.composerTriggerOptions}>
-              {composerCandidates.map((candidate, index) => (
-                <button
-                  id={`${composerMenuId}-${index}`}
-                  key={candidate.id}
-                  type="button"
-                  role="option"
-                  aria-selected={index === composerCandidateIndex}
-                  className={`${css.composerTriggerOption} ${index === composerCandidateIndex ? css.composerTriggerOptionActive : ''}`}
-                  onMouseDown={event => { event.preventDefault() }}
-                  onMouseEnter={() => { setComposerCandidateIndex(index) }}
-                  onClick={() => { acceptComposerCandidate(candidate) }}
-                >
-                  <strong>{candidate.label}</strong>
-                  <span>{candidate.description}</span>
-                </button>
-              ))}
-              {composerCandidatesLoading && <span className={css.composerTriggerEmpty}>正在搜索…</span>}
-              {!composerCandidatesLoading && composerCandidatesError !== undefined && (
-                <span className={css.composerTriggerEmpty}>{composerCandidatesError}</span>
-              )}
-              {!composerCandidatesLoading && composerCandidatesError === undefined && composerCandidates.length === 0 && (
-                <span className={css.composerTriggerEmpty}>
-                  当前成员没有匹配的已加载 Skill
-                </span>
-              )}
-            </div>
-          </div>
-        )}
         <textarea
           ref={textareaRef}
           value={content}
-          onChange={event => {
-            setContent(event.currentTarget.value)
-            updateComposerTrigger(event.currentTarget.value, event.currentTarget.selectionStart)
-          }}
-          onClick={event => {
-            updateComposerTrigger(event.currentTarget.value, event.currentTarget.selectionStart)
-          }}
-          onBlur={() => {
-            window.setTimeout(() => { setComposerTrigger(undefined) }, 100)
-          }}
+          onChange={event => { setContent(event.currentTarget.value) }}
           onCompositionStart={() => { composing.current = true }}
           onCompositionEnd={() => { composing.current = false }}
           onKeyDown={event => {
-            if (composerTrigger !== undefined) {
-              if (event.key === 'ArrowDown' && composerCandidates.length > 0) {
-                event.preventDefault()
-                setComposerCandidateIndex(current => (current + 1) % composerCandidates.length)
-                return
-              }
-              if (event.key === 'ArrowUp' && composerCandidates.length > 0) {
-                event.preventDefault()
-                setComposerCandidateIndex(current => (current - 1 + composerCandidates.length) % composerCandidates.length)
-                return
-              }
-              if ((event.key === 'Enter' || event.key === 'Tab') && composerCandidates.length > 0) {
-                event.preventDefault()
-                acceptComposerCandidate(composerCandidates[composerCandidateIndex]!)
-                return
-              }
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                setComposerTrigger(undefined)
-                return
-              }
-            }
             if (!shouldSubmitComposer({
               key: event.key,
               shiftKey: event.shiftKey,
@@ -457,11 +221,6 @@ export function ConversationColumn({
           }}
           disabled={!canChat}
           placeholder={!canChat ? '当前不可直接对话' : `发送消息到 ${member.displayName}…`}
-          aria-controls={composerTrigger === undefined ? undefined : composerMenuId}
-          aria-expanded={composerTrigger !== undefined}
-          aria-activedescendant={composerTrigger !== undefined && composerCandidates.length > 0
-            ? `${composerMenuId}-${composerCandidateIndex}`
-            : undefined}
           rows={2}
         />
         <div className={css.composerFooter}>
@@ -479,31 +238,8 @@ export function ConversationColumn({
                 </option>
               ))}
             </select>
-            {modelCapabilities.value?.reasoning !== undefined
-              && modelCapabilities.value.reasoning.efforts.length > 0 && (
-                <label
-                  className={`${css.reasoningModeControl} ${changingReasoning ? css.reasoningModeControlDisabled : ''}`}
-                  title={`思考模式：${reasoningModeLabel}；切换后下一轮生效`}
-                >
-                  <span>思考模式</span>
-                  <select
-                    aria-label={`${member.displayName} 思考模式；当前为 ${reasoningModeLabel}；切换后下一轮生效`}
-                    value={reasoningEffort}
-                    disabled={changingReasoning}
-                    onChange={event => { void changeReasoning(event.target.value) }}
-                  >
-                    <option value="">{defaultReasoningLabel(modelCapabilities.value)}</option>
-                    {modelCapabilities.value.reasoning.efforts.map(effort => (
-                      <option key={effort.id} value={effort.id}>
-                        {reasoningEffortLabel(modelCapabilities.value, effort.id)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
           </div>
           <div className={css.composerActions}>
-            <AssistantSkillsInfo skills={member.assistantSnapshot.skillAllowlist} />
             {running && (
               <Tooltip label={stopping ? '停止中…' : '停止生成'} side="top" delayMs={400}>
                 <button
@@ -532,43 +268,6 @@ export function ConversationColumn({
         {error && <span className={css.composerError}>{error}</span>}
       </form>
     </section>
-  )
-}
-
-function AssistantSkillsInfo({ skills }: { skills: readonly string[] }): JSX.Element {
-  return (
-    <div className={css.skillsInfo}>
-      <button
-        type="button"
-        className={css.skillsInfoButton}
-        aria-label={skills.length === 0 ? '当前助手未加载 Skills' : `查看当前助手加载的 ${skills.length} 个 Skills`}
-      >
-        <InfoIcon size={16} />
-      </button>
-      <div className={css.skillsInfoPopover} role="tooltip">
-        <div className={css.skillsInfoHeading}>
-          <strong>已加载 Skills</strong>
-          <span>{skills.length} 个</span>
-        </div>
-        {skills.length === 0
-          ? <span className={css.skillsInfoEmpty}>当前助手未加载 Skill</span>
-          : (
-            <ul className={css.skillsInfoList}>
-              {skills.map(skill => <li key={skill}>{skill}</li>)}
-            </ul>
-          )}
-      </div>
-    </div>
-  )
-}
-
-function InfoIcon({ size }: { size: number }): JSX.Element {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="8" cy="5" r="1" fill="currentColor" />
-      <path d="M8 7.5V11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
   )
 }
 
