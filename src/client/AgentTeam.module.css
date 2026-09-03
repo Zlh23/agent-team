@@ -10,13 +10,11 @@
   left: 16px;
   top: 62%;
   z-index: 30;
-  width: 42px;
   height: 42px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 0 11px;
-  overflow: hidden;
+  padding: 0 14px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 21px;
   background: var(--dsw-alias-bg-layer-1);
@@ -25,29 +23,12 @@
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
-  cursor: grab;
+  cursor: pointer;
   pointer-events: auto;
-  touch-action: none;
-  user-select: none;
-  transition:
-    width 180ms var(--ds-ease-in-out),
-    background-color 150ms var(--ds-ease-in-out),
-    box-shadow 150ms var(--ds-ease-in-out);
 }
 
-.floatingTeamLauncher:hover:not(.floatingTeamLauncherSettled),
-.floatingTeamLauncher:focus-visible:not(.floatingTeamLauncherSettled),
-.floatingTeamLauncherDragging {
-  width: 90px;
+.floatingTeamLauncher:hover {
   background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.floatingTeamLauncher.floatingTeamLauncherDragging {
-  cursor: grabbing;
-}
-
-.floatingTeamLauncher.floatingTeamLauncherSettled {
-  width: 42px;
 }
 
 .floatingTeamLauncherIcon {
@@ -72,55 +53,8 @@
   box-sizing: content-box;
 }
 
-.floatingTeamLauncher:hover .floatingTeamLauncherState,
-.floatingTeamLauncher:focus-visible .floatingTeamLauncherState,
-.floatingTeamLauncherDragging .floatingTeamLauncherState {
-  border-color: var(--dsw-alias-interactive-bg-hover);
-}
-
-.floatingTeamLauncher.floatingTeamLauncherSettled .floatingTeamLauncherState {
-  border-color: var(--dsw-alias-bg-layer-1);
-}
-
 .floatingTeamLauncherLabel {
   flex: none;
-  opacity: 0;
-  transform: translateX(-3px);
-  transition:
-    opacity 120ms var(--ds-ease-in-out),
-    transform 180ms var(--ds-ease-in-out);
-}
-
-.floatingTeamLauncher:hover:not(.floatingTeamLauncherSettled) .floatingTeamLauncherLabel,
-.floatingTeamLauncher:focus-visible:not(.floatingTeamLauncherSettled) .floatingTeamLauncherLabel,
-.floatingTeamLauncherDragging .floatingTeamLauncherLabel {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.floatingTeamLauncher.floatingTeamLauncherSettled .floatingTeamLauncherLabel {
-  opacity: 0;
-  transform: translateX(-3px);
-}
-
-.floatingTeamLauncher.floatingTeamLauncherDragging {
-  width: 90px;
-}
-
-.floatingTeamLauncher.floatingTeamLauncherDragging .floatingTeamLauncherState {
-  border-color: var(--dsw-alias-interactive-bg-hover);
-}
-
-.floatingTeamLauncher.floatingTeamLauncherDragging .floatingTeamLauncherLabel {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .floatingTeamLauncher,
-  .floatingTeamLauncherLabel {
-    transition: none;
-  }
 }
 
 .settingsSection {

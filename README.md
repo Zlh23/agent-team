@@ -11,7 +11,7 @@ Current release: `0.1.4`
 
 Build teams of independent AI agents inside DeepSeek Harness. Mix models and providers, assign one Leader, and let every member work in its own conversation.
 
-Agent Team does **not** turn members into subagents. Every member is an independent root agent with its own model, session, context, permissions, reasoning mode, and tool activity. Team tasks and messages provide the collaboration layer.
+Agent Team does **not** turn members into subagents. Every member is an independent root agent with its own model, session, context, permissions, and tool activity. Team tasks and messages provide the collaboration layer.
 
 ![Agent Team workbench](./demo/4.png)
 
@@ -26,7 +26,6 @@ Agent Team lets every member have an explicit, focused configuration:
 | Concern | Common parent/subagent setup | Agent Team |
 | --- | --- | --- |
 | Model | Often reuses the parent model or one shared model policy | Choose a different provider and model for every member |
-| Skills and MCP | A broad catalog may be inherited or exposed everywhere | Give each role only the Skills and MCP Servers it needs |
 | Context | Planning, execution, tool output, and results accumulate together | Every member has an isolated Session and context window |
 | Cost | Simple work may still consume an expensive general model | Route routine work to smaller or specialized models |
 | Permissions | One broad permission policy can spread across the workflow | Set least-privilege defaults and runtime permissions per member |
@@ -42,7 +41,7 @@ Consider a software development team with three specialized members:
 | Role | Model | Focused configuration |
 | --- | --- | --- |
 | Architecture Leader | GPT | Understand the requirement, design the solution, split work, coordinate members, and verify results |
-| Coding Agent | GLM | Load coding Skills and development MCP tools, modify files, and run tests |
+| Coding Agent | GLM | Modify files, run tests, and report results |
 | Review Assistant | DeepSeek Flash | Inspect results and summarize risks with read-only permission |
 
 The GPT Leader spends its context on decisions and verification instead of every implementation detail. GLM receives the codebase context and tools required for execution. DeepSeek Flash handles the narrow commit task quickly without paying for the Leader's higher-capability model or loading the coding agent's large tool catalog.
@@ -62,20 +61,17 @@ User goal → GPT Leader plans and assigns work
 - Mix providers and models in one team—for example, a Codex Leader with GLM coding members.
 - Create assistants manually with reusable role instructions.
 - Add the same assistant more than once; every selection becomes an independent team member.
-- Watch all members side by side with streaming output, Markdown, Think blocks, and tool calls.
+- Watch all members side by side with streaming output, Markdown, and tool calls.
 - Let the Leader create tasks, assign members, track progress, and collect results.
 - Send messages directly to the Leader or, when enabled, to regular members.
-- Change a member's permission preset and reasoning mode for the current session.
-- Inspect the Skills loaded for a member.
+- Change a member's permission preset for the current session.
 - Add or remove members, change the Leader, reset all contexts, or dissolve a team.
 
 ## Screenshots
 
 ### Reusable Assistant Library
 
-Manage assistants under **Settings → Agent Team**. Each assistant can use a different provider, model, preset, default permission, reasoning mode, Skills, MCP Servers, and role instructions.
-
-> **Skills and MCP scope:** Agent Team uses Skills and MCP Servers exposed through the standard DeepSeek Harness interfaces. This plugin does not provide installation, updates, or lifecycle management for Skills or MCP Servers. Install the appropriate Harness plugins to manage those resources first; Agent Team only lets an assistant select and use the resources already available in the active Profile.
+Manage assistants under **Settings → Agent Team**. Each assistant can use a different provider, model, preset, default permission, and role instructions.
 
 ![Assistant library](./demo/2.png)
 
@@ -87,7 +83,7 @@ Select members, assign exactly one Leader, and decide whether direct communicati
 
 ### Floating Team Launcher
 
-A compact floating button opens the full-screen Team workbench without competing with sidebar extensions from other Harness clients. Hover over it or drag it to reveal the label. Drop it at either screen edge to collapse it toward that edge; the last position is remembered locally. Create teams and switch between them from the workbench navigator.
+A compact floating button opens the full-screen Team workbench without competing with sidebar extensions from other Harness clients. A status dot shows when a team is executing tasks. Create teams and switch between them from the workbench navigator.
 
 ![Floating Team launcher](./demo/5.png)
 
@@ -147,38 +143,9 @@ Restart Harness after the command completes. Removing the plugin does not modify
 
 Configure the providers, models, and credentials you want to use in Harness first. Agent Team reads the model catalog from the active Profile and never stores provider API keys.
 
-> **Tip: enable Thinking Mode for GLM-5.3**
->
-> Add the following configuration to `~/.dsh/settings.yaml`. It exposes the available reasoning levels for GLM-5.3 and sets `high` as the Provider default:
->
-> ```yaml
-> llm-pi-ai:
->   providers:
->     zai-coding-cn:
->       reasoning: high
->       modelOverrides:
->         glm-5.3:
->           reasoningEfforts:
->             off:
->             minimal: minimal
->             low: low
->             medium: medium
->             high: high
->             xhigh: xhigh
->             max: max
->           compat:
->             thinkingFormat: zai
->             supportsReasoningEffort: true
-> ```
->
-> Merge this block into an existing `llm-pi-ai` section instead of adding a second one. If your ZAI Provider uses a different ID, replace `zai-coding-cn`. Restart Harness, then select the desired **Thinking Mode** from the assistant conversation toolbar; that runtime selection overrides the Provider default for the conversation.
-
 ### 2. Create Assistants
 
-Open **Settings → Agent Team** and choose one of the following:
-
-- **Start Conversation** to design an assistant through chat.
-- **Create Manually** to configure all fields directly.
+Open **Settings → Agent Team** and create assistants manually.
 
 A practical first team usually contains:
 
@@ -206,11 +173,9 @@ Send the complete objective to the Leader. The Leader can split it into tasks, a
 Each visible column is a real, independent Harness session.
 
 - **Member tabs:** show or hide conversations. Hover a non-Leader tab to remove that member.
-- **Conversation header:** shows role, provider, model, reasoning mode, and live status. Double-click it to enlarge the conversation.
-- **Composer:** send messages; type `/` to invoke an allowed Skill; stop generation; and change runtime settings.
+- **Conversation header:** shows role, provider, model, and live status.
+- **Composer:** send messages and stop generation.
 - **Permission:** applies to the selected member's current session. The assistant template only supplies the initial default.
-- **Reasoning mode:** applies from the next turn and only shows options supported by the selected model.
-- **Info:** displays the Skills loaded for the member.
 
 ## Team Collaboration
 
@@ -238,8 +203,7 @@ Assistant settings are snapshotted when a member joins a team. Editing an assist
 ## Important Behavior
 
 - The assistant's permission setting is only the member's initial default.
-- Reasoning options come from Harness model capabilities; unsupported options are not invented by the plugin.
-- MCP credentials remain in the Harness Profile. Assistant templates only store allowed server names.
+- MCP credentials remain in the Harness Profile.
 - Harness currently has no public API for physically deleting one session log. Reset or dissolved sessions are no longer restored or used by Agent Team, but old logs may remain in Harness storage.
 
 ## Troubleshooting
@@ -252,9 +216,9 @@ Run `npm install -g pnpm`, verify `pnpm --version`, and install the plugin again
 
 Another Harness process is already running. Stop the old process with `Ctrl+C`, then run `npx @deepseek-ai/dsh web` again.
 
-### A model or reasoning option is missing
+### A model is missing
 
-Refresh the assistant catalog and verify the model configuration in Harness. Reasoning modes only appear when the provider reports that capability.
+Refresh the assistant catalog and verify the model configuration in Harness.
 
 ### An assistant cannot be deleted
 

@@ -17,7 +17,6 @@ import { callAgentTeam } from '../api.js'
 import css from './ConversationColumn.module.css'
 import { mergeConversationNodes } from '../conversation-nodes.js'
 import { CrownIcon } from '../icons/CrownIcon.js'
-import { DeepThinkIcon } from '../icons/DeepThinkIcon.js'
 import { shouldSubmitComposer } from '../keyboard.js'
 import { memberStatusLabel, PERMISSION_LABELS } from '../labels.js'
 import { PendingInteractionCard } from './PendingInteractionCard.js'
@@ -277,9 +276,6 @@ export function ConversationNodeView({ node }: { node: ConversationNode }): JSX.
   if (node.kind === 'team-message') return <TeamMessageCard node={node} />
   return (
     <article className={`${css.messageNode} ${node.kind === 'user' ? css.userMessage : css.assistantMessage}`}>
-      {node.reasoning && (
-        <ReasoningBlock node={node} />
-      )}
       {node.text && (
         <div className={css.messageText}>
           {node.kind === 'assistant'
@@ -290,56 +286,6 @@ export function ConversationNodeView({ node }: { node: ConversationNode }): JSX.
       {node.streaming && <span className={css.streamingMark}>生成中…</span>}
     </article>
   )
-}
-
-function ReasoningBlock({
-  node,
-}: {
-  node: Extract<ConversationNode, { kind: 'user' | 'assistant' }>
-}): JSX.Element {
-  const reasoningRunning = node.reasoningStartedAt !== undefined
-    && node.reasoningCompletedAt === undefined
-    && node.streaming === true
-  const [now, setNow] = useState(() => Date.now())
-
-  useEffect(() => {
-    if (!reasoningRunning) return
-    setNow(Date.now())
-    const timer = window.setInterval(() => { setNow(Date.now()) }, 200)
-    return () => { window.clearInterval(timer) }
-  }, [reasoningRunning])
-
-  const elapsed = node.reasoningStartedAt === undefined
-    ? undefined
-    : Math.max(0, (node.reasoningCompletedAt ?? now) - node.reasoningStartedAt)
-  const timing = elapsed === undefined
-    ? undefined
-    : reasoningRunning
-      ? `思考中 · ${formatElapsedTime(elapsed)}`
-      : `用时 ${formatElapsedTime(elapsed)}`
-
-  return (
-    <details className={css.reasoningBlock}>
-      <summary>
-        <DeepThinkIcon size={14} className={css.reasoningIcon} />
-        <span>Think</span>
-        {timing !== undefined && (
-          <>
-            <span className={css.reasoningSeparator} aria-hidden="true">·</span>
-            <span className={css.reasoningTime}>{timing}</span>
-          </>
-        )}
-      </summary>
-      <pre>{node.reasoning}</pre>
-    </details>
-  )
-}
-
-function formatElapsedTime(milliseconds: number): string {
-  if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(1)} 秒`
-  const minutes = Math.floor(milliseconds / 60_000)
-  const seconds = Math.floor((milliseconds % 60_000) / 1_000)
-  return `${minutes} 分 ${seconds} 秒`
 }
 
 const TEAM_MESSAGE_TYPE_LABELS: Record<Extract<ConversationNode, { kind: 'team-message' }>['messageType'], string> = {

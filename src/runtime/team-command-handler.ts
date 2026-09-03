@@ -63,8 +63,6 @@ export class TeamCommandHandler {
             description: input.description?.trim() ?? '',
             status,
             ...(input.ownerSlotId === undefined ? {} : { ownerSlotId: input.ownerSlotId }),
-            createdBySlotId: creatorSlotId,
-            dependencyIds: [],
             revision: 1,
             createdAt: now,
             updatedAt: now,

@@ -11,7 +11,7 @@
 
 在 DeepSeek Harness 中组建由多个独立 AI Agent 构成的团队。你可以混用不同模型和 Provider，指定唯一 Leader，让每位成员拥有独立对话和上下文。
 
-Agent Team **不是 Subagent 方案**。每位成员都是独立的根级 Agent，拥有自己的模型、Session、上下文、权限、思考模式和工具调用；团队任务和消息构成协作层。
+Agent Team **不是 Subagent 方案**。每位成员都是独立的根级 Agent，拥有自己的模型、Session、上下文、权限和工具调用；团队任务和消息构成协作层。
 
 ![Agent Team 多成员工作台](./demo/4.png)
 
@@ -26,7 +26,6 @@ Agent Team 允许为每位成员设置明确、专注的配置：
 | 维度 | 常见父 Agent / Subagent 模式 | Agent Team |
 | --- | --- | --- |
 | 模型 | 通常复用父模型或统一模型策略 | 每位成员独立选择 Provider 和模型 |
-| Skills 与 MCP | 容易继承或暴露一套庞大工具目录 | 每个角色只加载自己需要的 Skills 和 MCP Servers |
 | 上下文 | 规划、执行、工具输出和结果不断堆积在一起 | 每位成员拥有独立 Session 和上下文窗口 |
 | 成本 | 简单任务也可能消耗昂贵的通用模型 | 常规任务可交给更小、更快或更专业的模型 |
 | 权限 | 一套较宽权限可能扩散到整个工作流 | 每位成员独立设置最小默认权限和运行时权限 |
@@ -42,7 +41,7 @@ Agent Team 允许为每位成员设置明确、专注的配置：
 | 角色 | 模型 | 专属配置与职责 |
 | --- | --- | --- |
 | 架构 Leader | GPT | 理解需求、设计方案、拆解任务、协调成员并验收结果 |
-| 编码 Agent | GLM | 加载编码 Skills 和开发类 MCP 工具，修改文件并执行测试 |
+| 编码 Agent | GLM | 修改文件、执行测试并回报结果 |
 | 审查助手 | DeepSeek Flash | 使用只读权限检查结果并总结风险 |
 
 GPT Leader 的上下文只保留关键决策、任务状态和验收结果，不必塞入所有编码细节；GLM 获取代码执行所需的仓库上下文和工具；DeepSeek Flash 快速处理范围明确的 Commit 任务，无需继续消耗 Leader 的高等级模型，也不必加载编码 Agent 的庞大工具目录。
@@ -62,20 +61,17 @@ GPT Leader 的上下文只保留关键决策、任务状态和验收结果，不
 - 在一个团队中混用不同 Provider 和模型，例如 Codex Leader 配合 GLM 编码成员。
 - 手动创建助手，为规划、编码、评审等职责配置角色规则。
 - 多次添加同一个助手，每次都会成为独立的团队成员实例。
-- 并排查看所有成员的流式输出、Markdown、Think 和工具调用。
+- 并排查看所有成员的流式输出、Markdown 和工具调用。
 - 让 Leader 创建任务、分派成员、跟踪进度并收集结果。
 - 与 Leader 直接沟通；启用对应策略后，也可直接与普通成员沟通。
-- 在运行时调整单个成员当前 Session 的权限和思考模式。
-- 查看当前成员加载的 Skills。
+- 在运行时调整单个成员当前 Session 的权限。
 - 动态添加或移出成员、更换 Leader、清空全部上下文或解散团队。
 
 ## 界面预览
 
 ### 可复用助手库
 
-在 **设置 → Agent 团队** 中管理助手。每个助手可独立配置 Provider、模型、Agent Preset、默认权限、思考模式、Skills、MCP Servers 和角色规则。
-
-> **Skills 与 MCP 能力边界：** Agent Team 使用 DeepSeek Harness 标准接口提供的 Skills 和 MCP Servers。本插件不提供 Skills 或 MCP Servers 的安装、更新及生命周期管理能力。请先安装相应的 Harness 插件来管理这些资源；Agent Team 只负责让助手选择并使用当前 Profile 中已经可用的资源。
+在 **设置 → Agent 团队** 中管理助手。每个助手可独立配置 Provider、模型、Agent Preset、默认权限和角色规则。
 
 ![助手库](./demo/2.png)
 
@@ -87,7 +83,7 @@ GPT Leader 的上下文只保留关键决策、任务状态和验收结果，不
 
 ### 悬浮团队入口
 
-紧凑的悬浮按钮用于打开全屏团队工作台，不会与其他 Harness 客户端的侧边栏扩展争抢位置。鼠标悬停或拖动时会展开文字；拖到屏幕左右边缘并松开后，按钮会朝对应边缘收起，并在本地记住最后位置。团队创建和切换统一在工作台导航栏中完成。
+紧凑的悬浮按钮用于打开全屏团队工作台，不会与其他 Harness 客户端的侧边栏扩展争抢位置。有团队执行任务时会显示状态点。团队创建和切换统一在工作台导航栏中完成。
 
 ![悬浮团队入口](./demo/5.png)
 
@@ -147,38 +143,9 @@ npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 
 先配置需要使用的 Provider、模型和凭据。Agent Team 读取当前 Profile 的模型目录，不保存 Provider API Key。
 
-> **Tips：为 GLM-5.3 开启思考模式**
->
-> 将下面的配置加入 `~/.dsh/settings.yaml`。它会为 GLM-5.3 声明可选的思考档位，并把 Provider 默认档位设为 `high`：
->
-> ```yaml
-> llm-pi-ai:
->   providers:
->     zai-coding-cn:
->       reasoning: high
->       modelOverrides:
->         glm-5.3:
->           reasoningEfforts:
->             off:
->             minimal: minimal
->             low: low
->             medium: medium
->             high: high
->             xhigh: xhigh
->             max: max
->           compat:
->             thinkingFormat: zai
->             supportsReasoningEffort: true
-> ```
->
-> 如果文件中已经存在 `llm-pi-ai`，请合并配置，不要重复添加同名顶层节点。如果你的 ZAI Provider ID 不是 `zai-coding-cn`，请替换为实际 ID。重启 Harness 后，可在助手对话工具栏的 **思考模式** 中选择档位；对话中的选择会覆盖 Provider 默认值。
-
 ### 2. 创建助手
 
-进入 **设置 → Agent 团队**，选择：
-
-- **开始对话**：通过聊天设计助手。
-- **手动新建**：直接填写完整配置。
+进入 **设置 → Agent 团队**，手动创建助手。
 
 一个实用的初始团队通常包含：
 
@@ -206,11 +173,9 @@ npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 每一列都是一个真实、独立的 Harness Session。
 
 - **成员标签**：控制对话列的显示与隐藏；鼠标悬停在非 Leader 标签上可以移出成员。
-- **对话标题**：展示角色、Provider、模型、思考模式和实时状态；双击可以放大该成员对话。
-- **输入框**：发送消息；输入 `/` 调用当前成员允许的 Skill；也可停止输出和修改运行配置。
+- **对话标题**：展示角色、Provider、模型和实时状态。
+- **输入框**：发送消息和停止输出。
 - **权限**：只影响当前成员的当前 Session；助手模板仅提供初始默认值。
-- **思考模式**：从下一轮开始生效，只展示当前模型支持的档位。
-- **Info**：查看成员当前加载的 Skills。
 
 ## Agent 如何协作
 
@@ -238,8 +203,7 @@ Leader 和成员通过明确的团队工具与消息通信：
 ## 重要行为
 
 - 助手模板中的权限只是成员首次启动的默认权限。
-- 思考模式来源于 Harness 返回的模型能力，插件不会伪造模型不支持的参数。
-- MCP 凭据保留在 Harness Profile 中，助手模板只保存允许使用的 Server 名称。
+- MCP 凭据保留在 Harness Profile 中。
 - Harness 当前没有物理删除单个 Session 日志的公开 API。清空或解散后的旧 Session 不再由 Agent Team 恢复或使用，但日志可能继续保留在 Harness 存储中。
 
 ## 常见问题
@@ -252,9 +216,9 @@ Leader 和成员通过明确的团队工具与消息通信：
 
 已有 Harness 进程正在运行。在旧终端按 `Ctrl+C` 停止，然后重新执行 `npx @deepseek-ai/dsh web`。
 
-### 找不到模型或思考模式
+### 找不到模型
 
-刷新助手目录并检查 Harness 模型配置。只有 Provider 声明对应能力时，插件才会展示思考模式档位。
+刷新助手目录并检查 Harness 模型配置。
 
 ### 助手无法删除
 

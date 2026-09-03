@@ -64,8 +64,6 @@ export const teamTaskSchema = z.object({
   description: z.string(),
   status: z.enum(['pending', 'assigned', 'running', 'blocked', 'completed', 'failed', 'cancelled']),
   ownerSlotId: nonEmpty.optional(),
-  createdBySlotId: nonEmpty.optional(),
-  dependencyIds: z.array(nonEmpty),
   result: z.string().optional(),
   error: z.string().optional(),
   revision: z.int().positive(),

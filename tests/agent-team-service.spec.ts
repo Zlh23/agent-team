@@ -446,7 +446,6 @@ describe('AgentTeamService', () => {
           description: 'Must not survive the reset.',
           status: 'running',
           ownerSlotId: Object.values(team.members).find(member => member.role === 'member')?.id,
-          dependencyIds: [],
           revision: 1,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),

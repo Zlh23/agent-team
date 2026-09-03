@@ -57,7 +57,7 @@ Leader 不能直接移出。应先把 Leader 角色转交给其他成员。
 | 会删除 | 会保留 |
 | --- | --- |
 | 团队配置 | 助手模板 |
-| 团队任务 | Provider、模型、Skills 和 MCP 配置 |
+| 团队任务 | Provider、模型配置 |
 | 团队消息和活动记录 | Harness 底层可能保留的 Session 日志 |
 | 插件对旧 Session 的恢复关系 | 已完成的外部产出 |
 
