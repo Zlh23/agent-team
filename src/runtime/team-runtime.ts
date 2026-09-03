@@ -552,7 +552,6 @@ export class TeamRuntime {
   }
 
   async recoverTeams(): Promise<void> {
-    await this.archivePersistedTeamSessions()
     const recoverable = this.service.listTeams().items.filter(team =>
       team.state === 'active'
       || team.state === 'starting'
@@ -760,7 +759,6 @@ export class TeamRuntime {
         throw new AgentTeamError('WORKSPACE_UNAVAILABLE', 'Workspace disappeared during start')
       }
       try {
-        await this.ctx.workspaceRegistry.archiveSession(sessionId)
         await workspace.attachSession(sessionId)
       } catch (error) {
         await handle.dispose()
@@ -800,19 +798,6 @@ export class TeamRuntime {
     if (identity === undefined || identity.teamId !== teamId || identity.slotId !== slotId) {
       throw new AgentTeamError('INVALID_REQUEST', 'Team tool caller identity does not match its scoped member')
     }
-  }
-
-  private async archivePersistedTeamSessions(): Promise<void> {
-    const persisted = new Set((await this.ctx.sessionPersistence.list()).map(header => String(header.id)))
-    const archived = new Set(this.ctx.workspaceRegistry.archivedSessionIds.map(id => String(id)))
-    const teamSessionIds = new Set(this.service.listTeams().items.flatMap(team => [
-      ...Object.values(team.members).map(member => member.sessionId),
-      ...Object.keys(team.retiredSessions),
-    ]))
-    const visible = [...teamSessionIds].filter(sessionId => persisted.has(sessionId) && !archived.has(sessionId))
-    await mapConcurrent(visible, this.config.runtimeConcurrency, async sessionId => {
-      await this.ctx.workspaceRegistry.archiveSession(SessionId(sessionId))
-    })
   }
 
   private requireOwned(sessionId: string): OwnedAgent {

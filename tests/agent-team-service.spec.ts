@@ -35,44 +35,6 @@ describe('AgentTeamService', () => {
     }))
   })
 
-  it('archives persisted team Sessions so ordinary conversation lists hide them', async () => {
-    const { ctx, service, store, archiveSession } = createHarness()
-    const assistant = await service.createAssistant(assistantInput())
-    const draft = await service.createTeamDraft({
-      name: 'Hidden Session Team',
-      members: [{ assistantId: assistant.id, role: 'leader' }],
-    })
-    const member = draft.members[draft.leaderSlotId]!
-    const retiredSessionId = 'agent-team:retired-session'
-    await store.updateTeam(draft.id, team => ({
-      ...team,
-      retiredSessions: {
-        [retiredSessionId]: {
-          formerSlotId: 'retired-slot',
-          sessionId: retiredSessionId,
-          displayName: 'Retired member',
-          removedAt: new Date().toISOString(),
-        },
-      },
-    }))
-    ctx.provide('sessionPersistence', {
-      list: async () => [
-        { id: member.sessionId },
-        { id: retiredSessionId },
-        { id: 'ordinary-session' },
-      ],
-    } as never)
-    const runtime = new TeamRuntime(ctx, config, service)
-
-    await runtimeInternals(runtime).archivePersistedTeamSessions()
-
-    expect(archiveSession).toHaveBeenCalledTimes(2)
-    expect(archiveSession).toHaveBeenCalledWith(member.sessionId)
-    expect(archiveSession).toHaveBeenCalledWith(retiredSessionId)
-    expect(archiveSession).not.toHaveBeenCalledWith('ordinary-session')
-    await runtime.dispose()
-  })
-
   it('lists the earliest created assistants first', async () => {
     const { service, store } = createHarness()
     const base = {
@@ -583,7 +545,6 @@ interface RuntimeInternals {
   messages: TeamMessageDispatcher
   ensureMembersOnline: (team: TeamAggregate) => Promise<void>
   ensureMemberOnline: (team: TeamAggregate, member: TeamAggregate['members'][string], persisted: boolean) => Promise<void>
-  archivePersistedTeamSessions: () => Promise<void>
   stopMember(teamId: string, slotId: string): Promise<void>
 }
 
