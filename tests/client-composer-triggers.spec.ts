@@ -7,22 +7,17 @@ import {
 } from '../src/client/composer-triggers.js'
 
 describe('composer triggers', () => {
-  it('finds slash and file triggers at the caret', () => {
+  it('finds slash triggers at the caret', () => {
     expect(composerTriggerAt('请执行 /doc', 8)).toEqual({
       kind: 'skill',
       start: 4,
       end: 8,
       query: 'doc',
     })
-    expect(composerTriggerAt('检查 @src/mai', 11)).toEqual({
-      kind: 'file',
-      start: 3,
-      end: 11,
-      query: 'src/mai',
-    })
+    expect(composerTriggerAt('检查 @src/mai', 11)).toBeUndefined()
   })
 
-  it('does not treat email addresses or quoted completed mentions as triggers', () => {
+  it('does not treat file mentions or email addresses as triggers', () => {
     expect(composerTriggerAt('a@example.com', 13)).toBeUndefined()
     expect(composerTriggerAt('@"docs/my plan.md"', 18)).toBeUndefined()
   })

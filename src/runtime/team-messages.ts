@@ -14,12 +14,11 @@ export function requireMessageContent(value: string): string {
 }
 
 export function createTeamMessage(
-  input: Omit<TeamMessage, 'schemaVersion' | 'attachments' | 'deliveryState' | 'createdAt'>,
+  input: Omit<TeamMessage, 'schemaVersion' | 'deliveryState' | 'createdAt'>,
 ): TeamMessage {
   return {
     schemaVersion: 1,
     ...input,
-    attachments: [],
     deliveryState: 'queued',
     createdAt: new Date().toISOString(),
   }
@@ -138,7 +137,7 @@ export function teamMessageHeader(displayName: string, slotId: string): string {
 }
 
 export function sessionHasMessage(agent: Agent, messageId: string): boolean {
-  return agent.session.events.some(event => {
+  return agent.session.snapshotEvents().some(event => {
     if (event.type !== 'agent/inbox/spliced') return false
     return event.data.inserted.some(message => String(message.id) === messageId)
   })

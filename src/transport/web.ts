@@ -8,12 +8,9 @@ import {
   AGENT_TEAM_API_PATH,
   AGENT_TEAM_EVENTS_PATH,
   AGENT_TEAM_METHODS,
-  AGENT_TEAM_UPLOAD_PATH,
   type AgentTeamRequest,
   type AgentTeamResponse,
 } from './contracts.js'
-
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 const requestSchema = z.object({
   requestId: z.string().trim().min(1).max(200),
@@ -68,17 +65,8 @@ export function registerWebTransport(
       handleEvents(request, response, clients)
     },
   })
-  const disposeUpload = ctx.webServer.register({
-    kind: 'exact',
-    path: AGENT_TEAM_UPLOAD_PATH,
-    handler: async (request, response) => {
-      await handleUpload(request, response, service, ctx)
-    },
-  })
-
   return {
     dispose() {
-      disposeUpload()
       disposeEvents()
       disposeApi()
       unsubscribe()
@@ -86,45 +74,6 @@ export function registerWebTransport(
       for (const response of clients) response.end()
       clients.clear()
     },
-  }
-}
-
-async function handleUpload(
-  request: IncomingMessage,
-  response: ServerResponse,
-  service: AgentTeamService,
-  ctx: Context,
-): Promise<void> {
-  const requestId = headerValue(request.headers['x-agent-team-request-id']) ?? 'unknown'
-  if (request.method !== 'POST') {
-    writeJson(response, 405, failure(requestId, 'METHOD_NOT_ALLOWED', 'Only POST is supported'))
-    return
-  }
-  if (!sameOrigin(request)) {
-    writeJson(response, 403, failure(requestId, 'ORIGIN_REJECTED', 'Cross-origin requests are not allowed'))
-    return
-  }
-  try {
-    const url = new URL(request.url ?? AGENT_TEAM_UPLOAD_PATH, `http://${request.headers.host ?? 'localhost'}`)
-    const teamId = url.searchParams.get('teamId')?.trim()
-    const encodedName = headerValue(request.headers['x-agent-team-file-name'])
-    if (!teamId || !encodedName) throw new AgentTeamError('INVALID_REQUEST', 'Team id and file name are required')
-    let fileName: string
-    try {
-      fileName = decodeURIComponent(encodedName)
-    } catch {
-      throw new AgentTeamError('INVALID_REQUEST', 'File name encoding is invalid')
-    }
-    const data = await readBytes(request, MAX_UPLOAD_BYTES)
-    const value = await service.uploadWorkspaceFile(teamId, fileName, data)
-    writeJson(response, 200, { requestId, ok: true, value })
-  } catch (error) {
-    if (!isAgentTeamError(error)) {
-      ctx.logger.error('agent-team: unhandled upload error', error)
-    }
-    const normalized = normalizeError(requestId, error)
-    const status = normalized.error.code.endsWith('_NOT_FOUND') ? 404 : 400
-    writeJson(response, status, normalized)
   }
 }
 
@@ -233,74 +182,6 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
       return service.cloneAssistant(payload.id, payload.name)
     }
     case 'assistant.delete': await service.deleteAssistant(idPayload.parse(request.payload).id); return null
-    case 'assistant.builder.list': return service.listAssistantBuilderConversations()
-    case 'assistant.builder.draft.get': return service.getAssistantBuilderDraft()
-    case 'assistant.builder.draft.configure': {
-      const payload = z.object({
-        provider: z.string().trim().min(1).max(200),
-        model: z.string().trim().min(1).max(500),
-      }).strict().parse(request.payload)
-      return service.configureAssistantBuilderDraft(payload.provider, payload.model)
-    }
-    case 'assistant.builder.start': {
-      const payload = z.object({
-        provider: z.string().trim().min(1).max(200),
-        model: z.string().trim().min(1).max(500),
-        content: z.string().trim().min(1).max(32_000),
-      }).strict().parse(request.payload)
-      return service.startAssistantBuilderConversation(payload.provider, payload.model, payload.content)
-    }
-    case 'assistant.builder.get': {
-      const payload = z.object({ sessionId: z.string().trim().min(1).max(200) }).strict().parse(request.payload)
-      return service.getAssistantBuilderConversation(payload.sessionId)
-    }
-    case 'assistant.builder.configure': {
-      const payload = z.object({
-        sessionId: z.string().trim().min(1).max(200),
-        provider: z.string().trim().min(1).max(200),
-        model: z.string().trim().min(1).max(500),
-      }).strict().parse(request.payload)
-      return service.configureAssistantBuilder(payload.sessionId, payload.provider, payload.model)
-    }
-    case 'assistant.builder.send': {
-      const payload = z.object({
-        sessionId: z.string().trim().min(1).max(200),
-        content: z.string().trim().min(1).max(32_000),
-      }).strict().parse(request.payload)
-      return service.sendAssistantBuilderMessage(payload.sessionId, payload.content)
-    }
-    case 'assistant.builder.interaction.respond': {
-      const payload = z.object({
-        sessionId: z.string().trim().min(1).max(200),
-        interactionId: z.string().trim().min(1).max(500),
-        response: interactionResponseSchema,
-      }).strict().parse(request.payload)
-      await service.respondToAssistantBuilderInteraction(
-        payload.sessionId,
-        payload.interactionId,
-        payload.response.kind === 'approval'
-          ? payload.response
-          : {
-            kind: 'question',
-            answers: payload.response.answers.map(answer => ({
-              id: answer.id,
-              selected: answer.selected,
-              ...(answer.custom === undefined ? {} : { custom: answer.custom }),
-            })),
-          },
-      )
-      return { accepted: true }
-    }
-    case 'assistant.builder.stop': {
-      const payload = z.object({ sessionId: z.string().trim().min(1).max(200) }).strict().parse(request.payload)
-      await service.stopAssistantBuilder(payload.sessionId)
-      return { accepted: true }
-    }
-    case 'assistant.builder.archive': {
-      const payload = z.object({ sessionId: z.string().trim().min(1).max(200) }).strict().parse(request.payload)
-      await service.archiveAssistantBuilderConversation(payload.sessionId)
-      return { archived: true }
-    }
     case 'team.list': return service.listTeams()
     case 'team.get': return service.getTeam(idPayload.parse(request.payload).id)
     case 'team.createDraft': return service.createTeamDraft(request.payload as never)
@@ -308,11 +189,9 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
       const payload = z.object({
         teamId: z.string().trim().min(1).max(200),
         name: z.string().trim().min(1).max(500),
-        workspaceId: z.string().trim().min(1).max(500),
       }).strict().parse(request.payload)
       return service.cloneTeam(payload.teamId, {
         name: payload.name,
-        workspaceId: payload.workspaceId,
       })
     }
     case 'team.start': return service.startTeam(idPayload.parse(request.payload).id, options)
@@ -332,7 +211,6 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
       const payload = z.object({ teamId: z.string().min(1), confirmation: z.string() }).strict().parse(request.payload)
       return service.resetTeam(payload.teamId, payload.confirmation, options)
     }
-    case 'team.message.list': return service.listMessages(idPayload.parse(request.payload).id)
     case 'team.message.send': {
       const payload = z.object({
         teamId: z.string().min(1),
@@ -397,35 +275,6 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
         options,
       )
     }
-    case 'team.workspace.list': {
-      const payload = z.object({
-        teamId: z.string().min(1),
-        path: z.string().max(4096).optional(),
-      }).strict().parse(request.payload)
-      return service.listWorkspace(payload.teamId, payload.path)
-    }
-    case 'team.workspace.search': {
-      const payload = z.object({
-        teamId: z.string().min(1),
-        query: z.string().max(4096).optional(),
-        limit: z.int().min(1).max(100).optional(),
-      }).strict().parse(request.payload)
-      return service.searchWorkspace(payload.teamId, payload.query, payload.limit)
-    }
-    case 'team.workspace.changes': {
-      const payload = z.object({ teamId: z.string().min(1) }).strict().parse(request.payload)
-      return service.getWorkspaceChanges(payload.teamId)
-    }
-    case 'team.workspace.diff': {
-      const payload = z.object({
-        teamId: z.string().min(1),
-        path: z.string().min(1).max(4096),
-        scope: z.enum(['staged', 'unstaged']),
-        layout: z.enum(['unified', 'split']),
-        theme: z.enum(['light', 'dark']),
-      }).strict().parse(request.payload)
-      return service.getWorkspaceDiff(payload.teamId, payload.path, payload.scope, payload.layout, payload.theme)
-    }
     case 'team.dissolve': {
       const payload = z.object({ teamId: z.string().min(1), confirmation: z.string() }).strict().parse(request.payload)
       await service.dissolveTeam(payload.teamId, payload.confirmation, options)
@@ -447,28 +296,6 @@ async function readJson(request: IncomingMessage, limit: number): Promise<unknow
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
 }
 
-async function readBytes(request: IncomingMessage, limit: number): Promise<Uint8Array> {
-  const declared = Number(request.headers['content-length'] ?? 0)
-  if (Number.isFinite(declared) && declared > limit) {
-    throw new AgentTeamError('INVALID_REQUEST', `File exceeds the ${Math.floor(limit / 1024 / 1024)} MB upload limit`)
-  }
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    size += buffer.byteLength
-    if (size > limit) {
-      throw new AgentTeamError('INVALID_REQUEST', `File exceeds the ${Math.floor(limit / 1024 / 1024)} MB upload limit`)
-    }
-    chunks.push(buffer)
-  }
-  return Buffer.concat(chunks)
-}
-
-function headerValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value
-}
-
 function sameOrigin(request: IncomingMessage): boolean {
   const origin = request.headers.origin
   if (origin === undefined) return true
@@ -482,10 +309,7 @@ function sameOrigin(request: IncomingMessage): boolean {
 }
 
 function broadcast(clients: Set<ServerResponse>, change: AgentTeamChange): void {
-  const event = change.entityType === 'conversation' ? 'conversation'
-    : change.entityType === 'assistant-builder' ? 'assistant-builder-conversation'
-      : change.entityType === 'workspace' ? 'workspace'
-      : 'change'
+  const event = change.entityType === 'conversation' ? 'conversation' : 'change'
   const frame = `id: ${change.cursor}\nevent: ${event}\ndata: ${JSON.stringify(change)}\n\n`
   for (const response of clients) response.write(frame)
 }

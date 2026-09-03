@@ -12,7 +12,6 @@ import {
 import { closeAgentTeam, openTeam, openTeamCreator, openTeams, useAgentTeamUi } from './store.js'
 import { isTeamExecuting } from './team-status.js'
 import { TeamPanel } from './teams/TeamPanel.js'
-import type { WorkspaceChoice } from './types.js'
 import css from './AgentTeam.module.css'
 import type {
   AssistantView,
@@ -20,9 +19,6 @@ import type {
   TeamView,
 } from '../transport/contracts.js'
 
-export type { WorkspaceChoice } from './types.js'
-
-const floatingLauncherStorageKey = 'dsh-agent-team:floating-launcher-position'
 const floatingLauncherMargin = 8
 const floatingLauncherWidth = 42
 const floatingLauncherExpandedWidth = 90
@@ -90,35 +86,6 @@ function isFloatingLauncherDocked(position: FloatingLauncherPosition): boolean {
     || position.x >= maxX - floatingLauncherDockThreshold
 }
 
-function readFloatingLauncherPlacement(): FloatingLauncherPlacement | undefined {
-  try {
-    const stored = window.localStorage.getItem(floatingLauncherStorageKey)
-    if (stored === null) return undefined
-    const parsed = JSON.parse(stored) as Partial<FloatingLauncherPosition> & { side?: unknown }
-    if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) return undefined
-    const position = { x: parsed.x as number, y: parsed.y as number }
-    return {
-      position,
-      side: parsed.side === 'left' || parsed.side === 'right'
-        ? parsed.side
-        : floatingLauncherSide(position),
-    }
-  } catch {
-    return undefined
-  }
-}
-
-function storeFloatingLauncherPlacement(placement: FloatingLauncherPlacement): void {
-  try {
-    window.localStorage.setItem(floatingLauncherStorageKey, JSON.stringify({
-      ...placement.position,
-      side: placement.side,
-    }))
-  } catch {
-    // Storage can be unavailable in restricted WebViews; dragging still works for the current session.
-  }
-}
-
 function FloatingTeamLauncher({ hasExecutingTeam }: { hasExecutingTeam: boolean }): JSX.Element {
   const [placement, setPlacement] = useState<FloatingLauncherPlacement>()
   const [dragPosition, setDragPosition] = useState<FloatingLauncherPosition>()
@@ -137,13 +104,10 @@ function FloatingTeamLauncher({ hasExecutingTeam }: { hasExecutingTeam: boolean 
   const suppressClickRef = useRef(false)
 
   useEffect(() => {
-    const stored = readFloatingLauncherPlacement() ?? defaultFloatingLauncherPlacement()
-    const initialPosition = clampFloatingLauncherPosition(stored.position)
+    const initialPosition = clampFloatingLauncherPosition(defaultFloatingLauncherPlacement().position)
     setPlacement({
       position: initialPosition,
-      side: isFloatingLauncherDocked(initialPosition)
-        ? floatingLauncherSide(initialPosition)
-        : stored.side,
+      side: floatingLauncherSide(initialPosition),
     })
     const handleResize = (): void => {
       setPlacement(current => {
@@ -192,12 +156,10 @@ function FloatingTeamLauncher({ hasExecutingTeam }: { hasExecutingTeam: boolean 
           : side === 'right'
             ? drag.position.x + floatingLauncherExpandedWidth - floatingLauncherWidth
             : drag.position.x
-      const nextPlacement: FloatingLauncherPlacement = {
+      setPlacement({
         position: clampFloatingLauncherPosition({ x: collapsedX, y: drag.position.y }),
         side,
-      }
-      setPlacement(nextPlacement)
-      storeFloatingLauncherPlacement(nextPlacement)
+      })
       setDockSettled(docked)
     }
     suppressClickRef.current = drag.moved
@@ -209,14 +171,14 @@ function FloatingTeamLauncher({ hasExecutingTeam }: { hasExecutingTeam: boolean 
   const style: CSSProperties | undefined = dragPosition !== undefined
     ? { left: dragPosition.x, right: 'auto', top: dragPosition.y }
     : placement === undefined
-    ? undefined
-    : placement.side === 'right'
-      ? {
-          left: 'auto',
-          right: Math.max(floatingLauncherMargin, window.innerWidth - placement.position.x - floatingLauncherWidth),
-          top: placement.position.y,
-        }
-      : { left: placement.position.x, top: placement.position.y }
+      ? undefined
+      : placement.side === 'right'
+        ? {
+            left: 'auto',
+            right: Math.max(floatingLauncherMargin, window.innerWidth - placement.position.x - floatingLauncherWidth),
+            top: placement.position.y,
+          }
+        : { left: placement.position.x, top: placement.position.y }
 
   return (
     <Tooltip
@@ -367,15 +329,15 @@ export function AgentTeamSettingsSection(_props: SettingsSectionOwnerProps): JSX
   )
 }
 
-export function AgentTeamOverlay({ pickWorkspace }: { pickWorkspace: () => Promise<WorkspaceChoice | null> }): JSX.Element | null {
+export function AgentTeamOverlay(): JSX.Element | null {
   const { visible, createTeamRequest, selectedTeamId } = useAgentTeamUi()
   const { catalog, assistants, teams, error, load } = useAgentTeamData(true)
   const selectedTeam = teams.find(team => team.id === selectedTeamId)
   const hasExecutingTeam = teams.some(isTeamExecuting)
   const headerTitle = selectedTeam?.name ?? 'Agent 团队'
   const headerSubtitle = selectedTeam === undefined
-    ? '多个平级 Agent，共享一个 Workspace'
-    : `${Object.keys(selectedTeam.members).length} 名成员 · ${selectedTeam.workspacePath}`
+    ? '多个平级、独立协作的 Agent'
+    : `${Object.keys(selectedTeam.members).length} 名成员`
 
   if (!visible) return <FloatingTeamLauncher hasExecutingTeam={hasExecutingTeam} />
 
@@ -451,7 +413,6 @@ export function AgentTeamOverlay({ pickWorkspace }: { pickWorkspace: () => Promi
             teams={teams}
             createRequest={createTeamRequest}
             selectedTeamId={selectedTeamId}
-            pickWorkspace={pickWorkspace}
             onChanged={load}
           />
         </main>

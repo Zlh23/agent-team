@@ -1,13 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { Config } from '../src/config.js'
 import { AgentTeamError } from '../src/domain/errors.js'
 import type {
   AssistantTemplate,
-  Operation,
   TeamActivity,
   TeamAggregate,
   TeamMessage,
@@ -17,17 +13,12 @@ import type { AgentTeamStore } from '../src/storage/store.js'
 import { TeamRuntime } from '../src/runtime/team-runtime.js'
 import type { TeamCommandHandler } from '../src/runtime/team-command-handler.js'
 import type { TeamMessageDispatcher } from '../src/runtime/team-message-dispatcher.js'
-import { ASSISTANT_BUILDER_PROMPT } from '../src/runtime/assistant-builder-runtime.js'
 
 const config: Config = {
   maxRequestBytes: 128 * 1024,
   sseHeartbeatMs: 20_000,
   runtimeConcurrency: 4,
   directMemberChatDefault: true,
-  assistantBuilderProvider: '',
-  assistantBuilderModel: '',
-  assistantBuilderAgentPresetId: '',
-  assistantBuilderPermissionPresetId: '',
 }
 
 describe('AgentTeamService', () => {
@@ -45,34 +36,42 @@ describe('AgentTeamService', () => {
     }))
   })
 
-  it('reuses identical uploads and only renames same-name files with different content', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'agent-team-upload-'))
-    try {
-      const { service } = createHarness(workspacePath)
-      const assistant = await service.createAssistant(assistantInput())
-      const team = await service.createTeamDraft({
-        name: 'Upload team',
-        workspaceId: 'workspace-1',
-        directMemberChat: true,
-        members: [{ assistantId: assistant.id, role: 'leader' }],
-      })
-      const bytes = new TextEncoder().encode('hello')
-      const changedBytes = new TextEncoder().encode('changed')
+  it('archives persisted team Sessions so ordinary conversation lists hide them', async () => {
+    const { ctx, service, store, archiveSession } = createHarness()
+    const assistant = await service.createAssistant(assistantInput())
+    const draft = await service.createTeamDraft({
+      name: 'Hidden Session Team',
+      members: [{ assistantId: assistant.id, role: 'leader' }],
+    })
+    const member = draft.members[draft.leaderSlotId]!
+    const retiredSessionId = 'agent-team:retired-session'
+    await store.updateTeam(draft.id, team => ({
+      ...team,
+      retiredSessions: {
+        [retiredSessionId]: {
+          formerSlotId: 'retired-slot',
+          sessionId: retiredSessionId,
+          displayName: 'Retired member',
+          removedAt: new Date().toISOString(),
+        },
+      },
+    }))
+    ctx.provide('sessionPersistence', {
+      list: async () => [
+        { id: member.sessionId },
+        { id: retiredSessionId },
+        { id: 'ordinary-session' },
+      ],
+    } as never)
+    const runtime = new TeamRuntime(ctx, config, service)
 
-      const first = await service.uploadWorkspaceFile(team.id, '../notes.txt', bytes)
-      const duplicate = await service.uploadWorkspaceFile(team.id, '../notes.txt', bytes)
-      const changed = await service.uploadWorkspaceFile(team.id, '../notes.txt', changedBytes)
-      const changedDuplicate = await service.uploadWorkspaceFile(team.id, '../notes.txt', changedBytes)
+    await runtimeInternals(runtime).archivePersistedTeamSessions()
 
-      expect(first).toEqual({ name: 'notes.txt', path: '.agent-team/uploads/notes.txt', bytes: 5 })
-      expect(duplicate).toEqual(first)
-      expect(changed).toEqual({ name: 'notes (1).txt', path: '.agent-team/uploads/notes (1).txt', bytes: 7 })
-      expect(changedDuplicate).toEqual(changed)
-      await expect(readFile(join(workspacePath, first.path), 'utf8')).resolves.toBe('hello')
-      await expect(readFile(join(workspacePath, changed.path), 'utf8')).resolves.toBe('changed')
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
+    expect(archiveSession).toHaveBeenCalledTimes(2)
+    expect(archiveSession).toHaveBeenCalledWith(member.sessionId)
+    expect(archiveSession).toHaveBeenCalledWith(retiredSessionId)
+    expect(archiveSession).not.toHaveBeenCalledWith('ordinary-session')
+    await runtime.dispose()
   })
 
   it('lists the earliest created assistants first', async () => {
@@ -109,100 +108,6 @@ describe('AgentTeamService', () => {
       'older-assistant',
       'newer-assistant',
     ])
-  })
-
-  it('delegates the built-in assistant builder conversation without storing it as a template', async () => {
-    const { service, store } = createHarness()
-    const conversation = {
-      schemaVersion: 1 as const,
-      sessionId: 'agent-team:assistant-builder',
-      status: 'idle' as const,
-      throughSeq: -1,
-      nodes: [],
-      pendingInteractions: [],
-      configuration: {
-        provider: 'test-provider',
-        model: 'test-model',
-        agentPresetId: 'standard',
-        permissionPresetId: 'workspace-write',
-      },
-    }
-    const draft = {
-      schemaVersion: 1 as const,
-      configuration: conversation.configuration,
-    }
-    const builder = {
-      listConversations: vi.fn(async () => ({ items: [], total: 0 })),
-      getDraft: vi.fn(async () => draft),
-      configureDraft: vi.fn(async () => ({
-        ...draft,
-        configuration: {
-          ...draft.configuration,
-          provider: 'another-provider',
-          model: 'another-model',
-        },
-      })),
-      startConversation: vi.fn(async () => conversation),
-      getConversation: vi.fn(async () => conversation),
-      configure: vi.fn(async () => ({
-        ...conversation,
-        configuration: {
-          ...conversation.configuration,
-          provider: 'another-provider',
-          model: 'another-model',
-        },
-      })),
-      sendMessage: vi.fn(async () => ({ messageId: 'message-1' })),
-      respondToInteraction: vi.fn(async () => {}),
-      stop: vi.fn(async () => {}),
-      archiveConversation: vi.fn(async () => {}),
-    }
-    service.attachAssistantBuilderRuntime(builder as never)
-
-    await expect(service.listAssistantBuilderConversations()).resolves.toEqual({ items: [], total: 0 })
-    await expect(service.getAssistantBuilderDraft()).resolves.toEqual(draft)
-    await expect(service.configureAssistantBuilderDraft('another-provider', 'another-model')).resolves.toMatchObject({
-      configuration: { provider: 'another-provider', model: 'another-model' },
-    })
-    await expect(service.startAssistantBuilderConversation(
-      'test-provider',
-      'test-model',
-      'Create a reviewer',
-    )).resolves.toEqual(conversation)
-    await expect(service.getAssistantBuilderConversation(conversation.sessionId)).resolves.toEqual(conversation)
-    await expect(service.configureAssistantBuilder(conversation.sessionId, 'another-provider', 'another-model')).resolves.toMatchObject({
-      configuration: { provider: 'another-provider', model: 'another-model' },
-    })
-    await expect(service.sendAssistantBuilderMessage(conversation.sessionId, 'Create a reviewer')).resolves.toEqual({ messageId: 'message-1' })
-    await service.respondToAssistantBuilderInteraction(conversation.sessionId, 'question:1', {
-      kind: 'question',
-      answers: [{ id: 'name', selected: ['Reviewer'] }],
-    })
-    await service.stopAssistantBuilder(conversation.sessionId)
-    await service.archiveAssistantBuilderConversation(conversation.sessionId)
-
-    expect(builder.sendMessage).toHaveBeenCalledWith(conversation.sessionId, 'Create a reviewer')
-    expect(builder.respondToInteraction).toHaveBeenCalledWith(
-      conversation.sessionId,
-      'question:1',
-      { kind: 'question', answers: [{ id: 'name', selected: ['Reviewer'] }] },
-    )
-    expect(builder.startConversation).toHaveBeenCalledWith('test-provider', 'test-model', 'Create a reviewer')
-    expect(builder.configureDraft).toHaveBeenCalledWith('another-provider', 'another-model')
-    expect(builder.configure).toHaveBeenCalledWith(conversation.sessionId, 'another-provider', 'another-model')
-    expect(builder.stop).toHaveBeenCalledWith(conversation.sessionId)
-    expect(builder.archiveConversation).toHaveBeenCalledWith(conversation.sessionId)
-    expect(store.listAssistants()).toHaveLength(0)
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('assistant_builder_get_catalog')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('assistant_builder_prepare')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('assistant_builder_commit')
-    expect(ASSISTANT_BUILDER_PROMPT).not.toContain('assistant_builder_create')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('必须等待新的用户消息')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('不要要求固定口令')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('明确表达同意')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('不要询问或限制普通工具')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('MCP Servers')
-    expect(ASSISTANT_BUILDER_PROMPT).toContain('优先调用 ask_user_question')
   })
 
   it('lists model- or user-invocable Skills with their invocation policy', async () => {
@@ -253,7 +158,7 @@ describe('AgentTeamService', () => {
     await expect(service.catalog()).resolves.toMatchObject({
       permissionPresets: [
         { value: 'standard', name: '标准' },
-        { value: 'workspace-write', name: '工作区可写' },
+        { value: 'workspace-write', name: '允许写入文件' },
       ],
     })
   })
@@ -279,7 +184,6 @@ describe('AgentTeamService', () => {
     })
     const team = await service.createTeamDraft({
       name: 'Reasoning Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     const member = team.members[team.leaderSlotId]!
@@ -301,7 +205,6 @@ describe('AgentTeamService', () => {
     })
     const team = await service.createTeamDraft({
       name: 'Reasoning Override Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     const member = team.members[team.leaderSlotId]!
@@ -330,7 +233,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const team = await service.createTeamDraft({
       name: 'Compiler Team',
-      workspaceId: 'workspace-1',
       members: [
         { assistantId: assistant.id, role: 'leader' },
         { assistantId: assistant.id, role: 'member' },
@@ -361,7 +263,6 @@ describe('AgentTeamService', () => {
     })
     const draft = await service.createTeamDraft({
       name: 'Source Team',
-      workspaceId: 'workspace-1',
       directMemberChat: false,
       members: [
         { assistantId: assistant.id, role: 'leader' },
@@ -391,14 +292,12 @@ describe('AgentTeamService', () => {
 
     const clone = await service.cloneTeam(source.id, {
       name: 'Copied Team',
-      workspaceId: 'workspace-1',
     })
     const sourceMembers = Object.values(source.members)
     const clonedMembers = Object.values(clone.members)
 
     expect(clone).toMatchObject({
       name: 'Copied Team',
-      workspaceId: 'workspace-1',
       state: 'draft',
       directMemberChat: false,
       revision: 1,
@@ -420,21 +319,6 @@ describe('AgentTeamService', () => {
     expect(clonedMembers.every(member => !sourceMembers.some(sourceMember => sourceMember.sessionId === member.sessionId))).toBe(true)
     expect(clone.members[clone.leaderSlotId]?.role).toBe('leader')
     expect(service.getTeam(source.id).tasks['task-1']).toBeDefined()
-  })
-
-  it('rejects cloning into an unavailable Workspace', async () => {
-    const { service } = createHarness()
-    const assistant = await service.createAssistant(assistantInput())
-    const source = await service.createTeamDraft({
-      name: 'Source Team',
-      workspaceId: 'workspace-1',
-      members: [{ assistantId: assistant.id, role: 'leader' }],
-    })
-
-    await expect(service.cloneTeam(source.id, {
-      name: 'Copied Team',
-      workspaceId: 'missing-workspace',
-    })).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
   })
 
   it('rejects malformed Skill names before storing a template', async () => {
@@ -466,7 +350,6 @@ describe('AgentTeamService', () => {
     })
     const team = await service.createTeamDraft({
       name: 'MCP Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
 
@@ -487,7 +370,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Durable Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     await store.updateTeam(draft.id, team => ({ ...team, state: 'active' }))
@@ -512,7 +394,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Retryable Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     await store.updateTeam(draft.id, team => ({ ...team, state: 'active' }))
@@ -541,7 +422,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Mutable Draft',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     const added = await service.addMember(draft.id, {
@@ -562,7 +442,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Growing Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     await store.updateTeam(draft.id, team => ({ ...team, state: 'active' }))
@@ -600,7 +479,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Dispatch Team',
-      workspaceId: 'workspace-1',
       members: [
         { assistantId: assistant.id, role: 'leader' },
         { assistantId: assistant.id, role: 'member' },
@@ -655,7 +533,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Recovery Team',
-      workspaceId: 'workspace-1',
       members: [
         { assistantId: assistant.id, role: 'leader' },
         { assistantId: assistant.id, role: 'member' },
@@ -696,7 +573,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Stop Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     await store.updateTeam(draft.id, team => ({
@@ -727,7 +603,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Roster Team',
-      workspaceId: 'workspace-1',
       members: [
         { assistantId: assistant.id, role: 'leader' },
         { assistantId: assistant.id, role: 'member' },
@@ -769,7 +644,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Permission Team',
-      workspaceId: 'workspace-1',
       members: [{ assistantId: assistant.id, role: 'leader' }],
     })
     await store.updateTeam(draft.id, team => ({ ...team, state: 'active' }))
@@ -792,7 +666,6 @@ describe('AgentTeamService', () => {
     const assistant = await service.createAssistant(assistantInput())
     const draft = await service.createTeamDraft({
       name: 'Fresh Context Team',
-      workspaceId: 'workspace-1',
       members: [
         { assistantId: assistant.id, role: 'leader' },
         { assistantId: assistant.id, role: 'member' },
@@ -848,6 +721,7 @@ function createHarness(workspacePath = '/tmp/agent-team-workspace'): {
   service: AgentTeamService
   store: MemoryStore
   permissionSet: ReturnType<typeof vi.fn>
+  archiveSession: ReturnType<typeof vi.fn>
 } {
   const ctx = new Context()
   ctx.provide('llm', {
@@ -917,12 +791,18 @@ function createHarness(workspacePath = '/tmp/agent-team-workspace'): {
     attachSession: async () => {},
     detachSession: async () => {},
   }
+  const archivedSessionIds: string[] = []
+  const archiveSession = vi.fn(async (sessionId: string) => {
+    if (!archivedSessionIds.includes(sessionId)) archivedSessionIds.push(sessionId)
+  })
   ctx.provide('workspaceRegistry', {
     get: (id: string) => id === workspace.id ? workspace : undefined,
     list: () => [workspace],
+    archivedSessionIds,
+    archiveSession,
   } as never)
   const store = new MemoryStore()
-  return { ctx, service: new AgentTeamService(ctx, config, store), store, permissionSet }
+  return { ctx, service: new AgentTeamService(ctx, config, store), store, permissionSet, archiveSession }
 }
 
 interface FakeAgent {
@@ -930,7 +810,7 @@ interface FakeAgent {
   cancel: ReturnType<typeof vi.fn>
   whenIdle: ReturnType<typeof vi.fn>
   status: 'idle' | 'running'
-  session: { events: Array<{ type: string; data: { inserted: unknown[] } }> }
+  session: { events: Array<{ type: string; data: { inserted: unknown[] } }>; snapshotEvents: () => Array<{ type: string; data: { inserted: unknown[] } }> }
 }
 
 interface RuntimeInternals {
@@ -939,6 +819,7 @@ interface RuntimeInternals {
   messages: TeamMessageDispatcher
   ensureMembersOnline: (team: TeamAggregate) => Promise<void>
   ensureMemberOnline: (team: TeamAggregate, member: TeamAggregate['members'][string], persisted: boolean) => Promise<void>
+  archivePersistedTeamSessions: () => Promise<void>
   stopMember(teamId: string, slotId: string): Promise<void>
 }
 
@@ -947,7 +828,7 @@ function runtimeInternals(runtime: TeamRuntime): RuntimeInternals {
 }
 
 function fakeAgent(): FakeAgent {
-  const session: FakeAgent['session'] = { events: [] }
+  const session: FakeAgent['session'] = { events: [], snapshotEvents: () => session.events }
   return {
     session,
     status: 'idle',
@@ -986,7 +867,6 @@ class MemoryStore implements AgentTeamStore {
   private teams = new Map<string, TeamAggregate>()
   private messages = new Map<string, TeamMessage>()
   private activities = new Map<string, TeamActivity>()
-  private operations = new Map<string, Operation>()
 
   getAssistant(id: string) { return this.assistants.get(id) }
   listAssistants() { return [...this.assistants.values()] }
@@ -1011,14 +891,6 @@ class MemoryStore implements AgentTeamStore {
   listActivities(teamId: string) { return [...this.activities.values()].filter(value => value.teamId === teamId) }
   async putActivity(value: TeamActivity) { this.activities.set(value.id, value) }
   async deleteActivity(id: string) { return this.activities.delete(id) }
-
-  getOperation(id: string) { return this.operations.get(id) }
-  listOperations() { return [...this.operations.values()] }
-  async putOperation(value: Operation) { this.operations.set(value.id, value) }
-  updateOperation(id: string, update: (current: Operation) => Operation) {
-    return updateMap(this.operations, id, update)
-  }
-  async deleteOperation(id: string) { return this.operations.delete(id) }
 }
 
 async function updateMap<T>(map: Map<string, T>, id: string, update: (current: T) => T): Promise<T> {

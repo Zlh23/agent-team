@@ -2,16 +2,16 @@
 
 English | [简体中文](./README_CN.md)
 
-![Agent Team — Independent Agents, Shared Workspace](./demo/github-banner.png)
+![Agent Team — Independent Agent Collaboration](./demo/github-banner.png)
 
 [![npm version](https://img.shields.io/npm/v/@limuyang2/dsh-agent-team.svg)](https://www.npmjs.com/package/@limuyang2/dsh-agent-team)
 [![license](https://img.shields.io/npm/l/@limuyang2/dsh-agent-team.svg)](https://www.npmjs.com/package/@limuyang2/dsh-agent-team)
 
 Current release: `0.1.4`
 
-Build teams of independent AI agents inside DeepSeek Harness. Mix models and providers, assign one Leader, and let every member work in its own conversation while sharing the same Workspace.
+Build teams of independent AI agents inside DeepSeek Harness. Mix models and providers, assign one Leader, and let every member work in its own conversation.
 
-Agent Team does **not** turn members into subagents. Every member is an independent root agent with its own model, session, context, permissions, reasoning mode, and tool activity. Team tasks, messages, and the shared Workspace provide the collaboration layer.
+Agent Team does **not** turn members into subagents. Every member is an independent root agent with its own model, session, context, permissions, reasoning mode, and tool activity. Team tasks and messages provide the collaboration layer.
 
 ![Agent Team workbench](./demo/4.png)
 
@@ -42,8 +42,8 @@ Consider a software development team with three specialized members:
 | Role | Model | Focused configuration |
 | --- | --- | --- |
 | Architecture Leader | GPT | Understand the requirement, design the solution, split work, coordinate members, and verify results |
-| Coding Agent | GLM | Load coding Skills and development MCP tools, modify the Workspace, and run tests |
-| Commit Assistant | DeepSeek Flash | Read Git status and diffs, then generate a Conventional Commit message with read-only permission |
+| Coding Agent | GLM | Load coding Skills and development MCP tools, modify files, and run tests |
+| Review Assistant | DeepSeek Flash | Inspect results and summarize risks with read-only permission |
 
 The GPT Leader spends its context on decisions and verification instead of every implementation detail. GLM receives the codebase context and tools required for execution. DeepSeek Flash handles the narrow commit task quickly without paying for the Leader's higher-capability model or loading the coding agent's large tool catalog.
 
@@ -53,30 +53,23 @@ The collaboration flow is explicit:
 User goal → GPT Leader plans and assigns work
           → GLM Coding Agent implements and reports test results
           → GPT Leader verifies the result
-          → DeepSeek Flash Commit Assistant summarizes the Git diff
+          → DeepSeek Flash Review Assistant inspects results and summarizes risks
 ```
 
 ## What You Can Do
 
 - Create reusable assistants for planning, coding, testing, review, documentation, or any other role.
 - Mix providers and models in one team—for example, a Codex Leader with GLM coding members.
-- Create assistants manually or describe a role to the built-in **Team Agent Assistant**.
+- Create assistants manually with reusable role instructions.
 - Add the same assistant more than once; every selection becomes an independent team member.
 - Watch all members side by side with streaming output, Markdown, Think blocks, and tool calls.
 - Let the Leader create tasks, assign members, track progress, and collect results.
 - Send messages directly to the Leader or, when enabled, to regular members.
 - Change a member's permission preset and reasoning mode for the current session.
-- Inspect loaded Skills, context usage, token statistics, and cache hit rate.
-- Browse shared Workspace files and preview Git changes and diffs.
+- Inspect the Skills loaded for a member.
 - Add or remove members, change the Leader, reset all contexts, or dissolve a team.
 
 ## Screenshots
-
-### Create an Assistant by Conversation
-
-Describe the role you need. The built-in assistant collects missing settings, prepares the long-term instructions, and creates the assistant only after your confirmation.
-
-![Create an assistant by conversation](./demo/1.png)
 
 ### Reusable Assistant Library
 
@@ -88,7 +81,7 @@ Manage assistants under **Settings → Agent Team**. Each assistant can use a di
 
 ### Build a Team
 
-Select members, assign exactly one Leader, choose a Workspace, and decide whether direct communication with regular members is allowed.
+Select members, assign exactly one Leader, and decide whether direct communication with regular members is allowed.
 
 ![Build a team](./demo/3.png)
 
@@ -146,7 +139,7 @@ Stop Harness with `Ctrl+C`, then remove Agent Team from the `web` Profile:
 npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 ```
 
-Restart Harness after the command completes. Removing the plugin does not modify DeepSeek Harness source code or delete files from your team Workspaces.
+Restart Harness after the command completes. Removing the plugin does not modify DeepSeek Harness source code.
 
 ## Quick Start
 
@@ -198,7 +191,7 @@ Click the floating **Team** button, then click `+` in the workbench navigator:
 
 1. Add assistants from the list. You may add the same assistant multiple times.
 2. Select exactly one member as the Leader.
-3. Enter a team name and choose a Workspace.
+3. Enter a team name.
 4. Choose whether users may chat directly with regular members.
 5. Click **Create and Start**.
 
@@ -214,12 +207,10 @@ Each visible column is a real, independent Harness session.
 
 - **Member tabs:** show or hide conversations. Hover a non-Leader tab to remove that member.
 - **Conversation header:** shows role, provider, model, reasoning mode, and live status. Double-click it to enlarge the conversation.
-- **Composer:** send messages; type `/` to invoke an allowed Skill; type `@` to search and mention Workspace files; attach local files, stop generation, and change runtime settings.
+- **Composer:** send messages; type `/` to invoke an allowed Skill; stop generation; and change runtime settings.
 - **Permission:** applies to the selected member's current session. The assistant template only supplies the initial default.
 - **Reasoning mode:** applies from the next turn and only shows options supported by the selected model.
 - **Info:** displays the Skills loaded for the member.
-- **Context ring:** displays context usage, input/output tokens, and cache hit rate.
-- **Workspace:** browse files, refresh manually, watch file changes, and preview Git diffs.
 
 ## Team Collaboration
 
@@ -232,15 +223,15 @@ The Leader and members communicate through explicit team tools and messages:
 - Members can send direct team messages when clarification is needed.
 - Membership changes are delivered to the Leader with stable member IDs.
 
-Members share a Workspace, but they do not share conversation history. This keeps roles and model contexts isolated while allowing them to work on the same files.
+Members do not share conversation history, keeping roles and model contexts isolated.
 
 ## Team Management
 
 - **Add member:** starts a new independent member from an assistant snapshot and notifies the Leader.
 - **Remove member:** stops and archives that member's session, removes it from the team, and notifies the Leader.
 - **Change Leader:** changes the role without replacing the member's current session.
-- **Clear tasks and context:** stops all members, clears team tasks and queued messages, and gives every remaining member a new session. Team settings and Workspace files stay unchanged.
-- **Dissolve team:** permanently removes the team, its tasks, and team messages. Assistant templates and Workspace files are not deleted.
+- **Clear tasks and context:** stops all members, clears team tasks and queued messages, and gives every remaining member a new session. Team settings stay unchanged.
+- **Dissolve team:** permanently removes the team, its tasks, and team messages. Assistant templates are not deleted.
 
 Assistant settings are snapshotted when a member joins a team. Editing an assistant later does not hot-update existing members; remove and add the member again to apply the new configuration.
 
@@ -249,8 +240,6 @@ Assistant settings are snapshotted when a member joins a team. Editing an assist
 - The assistant's permission setting is only the member's initial default.
 - Reasoning options come from Harness model capabilities; unsupported options are not invented by the plugin.
 - MCP credentials remain in the Harness Profile. Assistant templates only store allowed server names.
-- Files selected from outside the Workspace are copied to `.agent-team/uploads/` so agents can access them reliably.
-- The **Changes** view requires a Git Workspace. Normal folders still support file browsing.
 - Harness currently has no public API for physically deleting one session log. Reset or dissolved sessions are no longer restored or used by Agent Team, but old logs may remain in Harness storage.
 
 ## Troubleshooting
@@ -271,10 +260,6 @@ Refresh the assistant catalog and verify the model configuration in Harness. Rea
 
 The assistant is still referenced by a team member. Remove those members or dissolve the related teams first.
 
-### No Git changes are displayed
-
-Confirm that the selected Workspace itself is a Git repository. A repository nested inside a non-Git Workspace is not treated as the Workspace repository.
-
 ## User Documentation
 
 The detailed user guide is available in Chinese:
@@ -284,7 +269,6 @@ The detailed user guide is available in Chinese:
 - [Assistant library](./docs/assistants.md)
 - [Creating teams](./docs/creating-teams.md)
 - [Workbench and collaboration](./docs/workbench.md)
-- [Workspace and Git changes](./docs/workspace.md)
 - [Team management](./docs/team-management.md)
 - [Troubleshooting](./docs/troubleshooting.md)
 

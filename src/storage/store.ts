@@ -1,7 +1,6 @@
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {
   AssistantTemplate,
-  Operation,
   TeamActivity,
   TeamAggregate,
   TeamMessage,
@@ -28,12 +27,6 @@ export interface AgentTeamStore {
   listActivities(teamId: string): TeamActivity[]
   putActivity(value: TeamActivity): Promise<void>
   deleteActivity(id: string): Promise<boolean>
-
-  getOperation(id: string): Operation | undefined
-  listOperations(): Operation[]
-  putOperation(value: Operation): Promise<void>
-  updateOperation(id: string, update: (current: Operation) => Operation): Promise<Operation>
-  deleteOperation(id: string): Promise<boolean>
 }
 
 export class DomainAgentTeamStore implements AgentTeamStore {
@@ -41,14 +34,12 @@ export class DomainAgentTeamStore implements AgentTeamStore {
   private readonly teams: KvTable<string, TeamAggregate>
   private readonly messages: KvTable<string, TeamMessage>
   private readonly activities: KvTable<string, TeamActivity>
-  private readonly operations: KvTable<string, Operation>
 
   constructor(readonly domain: Domain<typeof agentTeamDomainSpec>) {
     this.assistants = domain.table('assistants')
     this.teams = domain.table('teams')
     this.messages = domain.table('messages')
     this.activities = domain.table('activities')
-    this.operations = domain.table('operations')
   }
 
   getAssistant(id: string): AssistantTemplate | undefined {
@@ -122,27 +113,6 @@ export class DomainAgentTeamStore implements AgentTeamStore {
 
   deleteActivity(id: string): Promise<boolean> {
     return this.activities.delete(id)
-  }
-
-  getOperation(id: string): Operation | undefined {
-    return this.operations.get(id)
-  }
-
-  listOperations(): Operation[] {
-    return values(this.operations)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
-  }
-
-  putOperation(value: Operation): Promise<void> {
-    return this.operations.put(value.id, value)
-  }
-
-  updateOperation(id: string, update: (current: Operation) => Operation): Promise<Operation> {
-    return this.operations.update(id, update)
-  }
-
-  deleteOperation(id: string): Promise<boolean> {
-    return this.operations.delete(id)
   }
 }
 

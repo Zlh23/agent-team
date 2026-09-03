@@ -26,7 +26,7 @@ import type {
   MemberConversationView,
   TeamWorkbenchView,
 } from '../transport/contracts.js'
-import { projectContextUsage, projectConversation } from './conversation-projector.js'
+import { projectConversation } from './conversation-projector.js'
 import { registerScopedSkillProvider } from './scoped-skills.js'
 import { TeamCommandHandler } from './team-command-handler.js'
 import { TeamInteractionBridge } from './team-interaction-bridge.js'
@@ -108,7 +108,7 @@ export class TeamRuntime {
     const team = this.service.getTeam(teamId)
     const conversations = await Promise.all(Object.values(team.members).map(async member => {
       const owned = this.owned.get(member.sessionId)
-      let events = owned?.handle.agent.session.events
+      let events = owned === undefined ? undefined : owned.handle.agent.session.snapshotEvents()
       if (events === undefined) {
         try {
           events = (await this.ctx.sessionPersistence.inspect(SessionId(member.sessionId))).events
@@ -141,7 +141,7 @@ export class TeamRuntime {
       this.service.publishConversation(
         teamId,
         current.revision,
-        this.projectMemberConversation(current, currentMember, owned.handle.agent.session.events),
+        this.projectMemberConversation(current, currentMember, owned.handle.agent.session.snapshotEvents()),
       )
     }
   }
@@ -226,9 +226,11 @@ export class TeamRuntime {
           teamId,
           current => ({
             ...current,
-            members: mapMembers(current, currentMember => currentMember.id === slotId
-              ? withReasoningEffort(currentMember, reasoningEffort)
-              : currentMember),
+            members: mapMembers(current, currentMember => {
+              if (currentMember.id !== slotId) return currentMember
+              const { reasoningEffort: _previous, ...rest } = currentMember
+              return reasoningEffort === undefined ? rest : { ...rest, reasoningEffort }
+            }),
           }),
           'team.member_reasoning_changed',
           `Member ${member.displayName} reasoning changed to ${reasoningEffort ?? 'model default'}`,
@@ -247,7 +249,6 @@ export class TeamRuntime {
   ): MemberConversationView {
     const owned = this.owned.get(member.sessionId)
     const status: MemberConversationView['status'] = owned?.handle.agent.status ?? member.lastRuntimeState
-    const contextUsage = projectContextUsage(events)
     return {
       slotId: member.id,
       sessionId: member.sessionId,
@@ -257,7 +258,6 @@ export class TeamRuntime {
         team,
         messages: this.service.listMessages(team.id).items,
       }),
-      ...(contextUsage === undefined ? {} : { contextUsage }),
     }
   }
 
@@ -599,6 +599,7 @@ export class TeamRuntime {
   }
 
   async recoverTeams(): Promise<void> {
+    await this.archivePersistedTeamSessions()
     const recoverable = this.service.listTeams().items.filter(team =>
       team.state === 'active'
       || team.state === 'starting'
@@ -607,7 +608,7 @@ export class TeamRuntime {
       try {
         await this.exclusive(team.id, async () => {
           await this.ensureMembersOnline(team)
-      await this.messages.recover(this.service.getTeam(team.id))
+          await this.messages.recover(this.service.getTeam(team.id))
           await this.service.updateRuntimeTeam(
             team.id,
             current => ({ ...current, state: 'active' }),
@@ -655,7 +656,7 @@ export class TeamRuntime {
       this.service.publishConversation(
         team.id,
         team.revision,
-        this.projectMemberConversation(team, member, owned.handle.agent.session.events),
+        this.projectMemberConversation(team, member, owned.handle.agent.session.snapshotEvents()),
       )
     } catch (error) {
       this.ctx.logger.warn('agent-team: failed to publish interaction update', error)
@@ -895,6 +896,7 @@ export class TeamRuntime {
         throw new AgentTeamError('WORKSPACE_UNAVAILABLE', 'Workspace disappeared during start')
       }
       try {
+        await this.ctx.workspaceRegistry.archiveSession(sessionId)
         await workspace.attachSession(sessionId)
       } catch (error) {
         await handle.dispose()
@@ -927,7 +929,6 @@ export class TeamRuntime {
   }
 
 
-
   private assertToolIdentity(agent: Agent | undefined, teamId: string, slotId: string): void {
     if (agent === undefined) throw new AgentTeamError('INVALID_REQUEST', 'Team tool requires an Agent caller')
     const owned = this.owned.get(String(agent.id))
@@ -935,6 +936,19 @@ export class TeamRuntime {
     if (identity === undefined || identity.teamId !== teamId || identity.slotId !== slotId) {
       throw new AgentTeamError('INVALID_REQUEST', 'Team tool caller identity does not match its scoped member')
     }
+  }
+
+  private async archivePersistedTeamSessions(): Promise<void> {
+    const persisted = new Set((await this.ctx.sessionPersistence.list()).map(header => String(header.id)))
+    const archived = new Set(this.ctx.workspaceRegistry.archivedSessionIds.map(id => String(id)))
+    const teamSessionIds = new Set(this.service.listTeams().items.flatMap(team => [
+      ...Object.values(team.members).map(member => member.sessionId),
+      ...Object.keys(team.retiredSessions),
+    ]))
+    const visible = [...teamSessionIds].filter(sessionId => persisted.has(sessionId) && !archived.has(sessionId))
+    await mapConcurrent(visible, this.config.runtimeConcurrency, async sessionId => {
+      await this.ctx.workspaceRegistry.archiveSession(SessionId(sessionId))
+    })
   }
 
   private requireOwned(sessionId: string): OwnedAgent {
@@ -993,14 +1007,6 @@ function mapMembers(
   map: (member: TeamMemberSlot) => TeamMemberSlot,
 ): TeamAggregate['members'] {
   return Object.fromEntries(Object.entries(team.members).map(([id, member]) => [id, map(member)]))
-}
-
-function withReasoningEffort(
-  member: TeamMemberSlot,
-  reasoningEffort: string | undefined,
-): TeamMemberSlot {
-  const { reasoningEffort: _current, ...rest } = member
-  return reasoningEffort === undefined ? rest : { ...rest, reasoningEffort }
 }
 
 function skillNameFromArguments(value: unknown): string | undefined {

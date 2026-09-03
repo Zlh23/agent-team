@@ -11,7 +11,6 @@ import type {
 
 export const AGENT_TEAM_API_PATH = '/agent-team/api'
 export const AGENT_TEAM_EVENTS_PATH = '/agent-team/events'
-export const AGENT_TEAM_UPLOAD_PATH = '/agent-team/upload'
 
 export const AGENT_TEAM_METHODS = [
   'catalog.get',
@@ -24,16 +23,6 @@ export const AGENT_TEAM_METHODS = [
   'assistant.update',
   'assistant.clone',
   'assistant.delete',
-  'assistant.builder.list',
-  'assistant.builder.draft.get',
-  'assistant.builder.draft.configure',
-  'assistant.builder.start',
-  'assistant.builder.get',
-  'assistant.builder.configure',
-  'assistant.builder.send',
-  'assistant.builder.interaction.respond',
-  'assistant.builder.stop',
-  'assistant.builder.archive',
   'team.list',
   'team.get',
   'team.createDraft',
@@ -43,17 +32,12 @@ export const AGENT_TEAM_METHODS = [
   'team.removeMember',
   'team.changeLeader',
   'team.reset',
-  'team.message.list',
   'team.message.send',
   'team.workbench.get',
   'team.member.stop',
   'team.interaction.respond',
   'team.member.setPermissionPreset',
   'team.member.setReasoningEffort',
-  'team.workspace.list',
-  'team.workspace.search',
-  'team.workspace.changes',
-  'team.workspace.diff',
   'team.dissolve',
 ] as const
 
@@ -72,7 +56,6 @@ export interface CatalogView {
   models: Record<string, Array<{ id: string; name: string; description?: string }>>
   agentPresets: Array<{ id: string; name: string; description?: string; broken?: string }>
   permissionPresets: Array<{ value: string; name: string; description?: string }>
-  workspaces: Array<{ id: string; path: string; title: string; status: 'ok' | 'missing-dir' }>
 }
 
 export interface ModelCapabilitiesView {
@@ -204,15 +187,6 @@ export interface MemberConversationView {
   status: 'offline' | 'starting' | 'idle' | 'running' | 'waiting_approval' | 'error'
   nodes: ConversationNode[]
   pendingInteractions: PendingInteractionView[]
-  contextUsage?: {
-    usedTokens: number
-    inputTokens: number
-    outputTokens: number
-    cacheReadTokens: number
-    cacheWriteTokens: number
-    reasoningTokens: number
-    contextWindow?: number
-  }
 }
 
 export interface TeamWorkbenchView {
@@ -220,76 +194,6 @@ export interface TeamWorkbenchView {
   teamId: string
   revision: number
   conversations: MemberConversationView[]
-}
-
-export interface AssistantBuilderConversationView {
-  schemaVersion: 1
-  sessionId: string
-  status: 'starting' | 'idle' | 'running' | 'error'
-  throughSeq: number
-  nodes: ConversationNode[]
-  pendingInteractions: PendingInteractionView[]
-  configuration: {
-    provider: string
-    model: string
-    agentPresetId: string
-    permissionPresetId: string
-  }
-}
-
-export interface AssistantBuilderConversationSummary {
-  sessionId: string
-  title: string
-  createdAt: string
-  updatedAt: string
-  state: 'new' | 'in_progress' | 'completed'
-}
-
-export interface AssistantBuilderConversationListView {
-  items: AssistantBuilderConversationSummary[]
-  total: number
-}
-
-export interface AssistantBuilderDraftView {
-  schemaVersion: 1
-  configuration: AssistantBuilderConversationView['configuration']
-}
-
-export interface WorkspaceEntryView {
-  name: string
-  path: string
-  kind: 'file' | 'directory' | 'symlink'
-}
-
-export interface WorkspaceGitChangeView {
-  path: string
-  originalPath?: string
-  kind: 'added' | 'copied' | 'deleted' | 'modified' | 'renamed' | 'type-changed' | 'unmerged' | 'untracked'
-  staged: boolean
-  unstaged: boolean
-  indexCode: string
-  workTreeCode: string
-}
-
-export interface WorkspaceGitStatusView {
-  state: 'repository' | 'not-repository'
-  changes: WorkspaceGitChangeView[]
-  truncated: boolean
-}
-
-export interface WorkspaceGitDiffView {
-  path: string
-  scope: 'staged' | 'unstaged'
-  layout: 'unified' | 'split'
-  theme: 'light' | 'dark'
-  html: string
-  binary: boolean
-}
-
-export interface WorkspaceUploadView {
-  name: string
-  path: string
-  bytes: number
 }
 
 export interface AgentTeamRequestMap {
@@ -306,35 +210,6 @@ export interface AgentTeamRequestMap {
   'assistant.update': { payload: { id: string; value: UpdateAssistantInput }; result: AssistantView }
   'assistant.clone': { payload: { id: string; name?: string }; result: AssistantView }
   'assistant.delete': { payload: { id: string }; result: null }
-  'assistant.builder.list': { payload: undefined; result: AssistantBuilderConversationListView }
-  'assistant.builder.draft.get': { payload: undefined; result: AssistantBuilderDraftView }
-  'assistant.builder.draft.configure': {
-    payload: { provider: string; model: string }
-    result: AssistantBuilderDraftView
-  }
-  'assistant.builder.start': {
-    payload: { provider: string; model: string; content: string }
-    result: AssistantBuilderConversationView
-  }
-  'assistant.builder.get': { payload: { sessionId: string }; result: AssistantBuilderConversationView }
-  'assistant.builder.configure': {
-    payload: { sessionId: string; provider: string; model: string }
-    result: AssistantBuilderConversationView
-  }
-  'assistant.builder.send': {
-    payload: { sessionId: string; content: string }
-    result: { messageId: string }
-  }
-  'assistant.builder.interaction.respond': {
-    payload: {
-      sessionId: string
-      interactionId: string
-      response: InteractionResponseInput
-    }
-    result: { accepted: boolean }
-  }
-  'assistant.builder.stop': { payload: { sessionId: string }; result: { accepted: boolean } }
-  'assistant.builder.archive': { payload: { sessionId: string }; result: { archived: boolean } }
   'team.list': { payload: undefined; result: PageView<TeamView> }
   'team.get': { payload: { id: string }; result: TeamView }
   'team.createDraft': { payload: CreateTeamDraftInput; result: TeamView }
@@ -344,7 +219,6 @@ export interface AgentTeamRequestMap {
   'team.removeMember': { payload: { teamId: string; slotId: string }; result: TeamView }
   'team.changeLeader': { payload: { teamId: string; successorSlotId: string }; result: TeamView }
   'team.reset': { payload: { teamId: string; confirmation: string }; result: TeamView }
-  'team.message.list': { payload: { id: string }; result: PageView<TeamMessage> }
   'team.message.send': {
     payload: { teamId: string; content: string; targetSlotId?: string }
     result: TeamMessage
@@ -367,25 +241,6 @@ export interface AgentTeamRequestMap {
   'team.member.setReasoningEffort': {
     payload: { teamId: string; slotId: string; reasoningEffort?: string }
     result: TeamView
-  }
-  'team.workspace.list': {
-    payload: { teamId: string; path?: string }
-    result: WorkspaceEntryView[]
-  }
-  'team.workspace.search': {
-    payload: { teamId: string; query?: string; limit?: number }
-    result: WorkspaceEntryView[]
-  }
-  'team.workspace.changes': { payload: { teamId: string }; result: WorkspaceGitStatusView }
-  'team.workspace.diff': {
-    payload: {
-      teamId: string
-      path: string
-      scope: 'staged' | 'unstaged'
-      layout: 'unified' | 'split'
-      theme: 'light' | 'dark'
-    }
-    result: WorkspaceGitDiffView
   }
   'team.dissolve': { payload: { teamId: string; confirmation: string }; result: null }
 }

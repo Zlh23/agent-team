@@ -9,7 +9,7 @@ export const TASK_STATE_LABELS: Readonly<Record<string, string>> = {
 
 export const PERMISSION_LABELS: Readonly<Record<string, string>> = {
   'read-only': '只读',
-  'workspace-write': '工作区可写',
+  'workspace-write': '允许写入文件',
   'danger-full-access': '完全访问',
 }
 

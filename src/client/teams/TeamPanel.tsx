@@ -2,9 +2,7 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
-  IconChevronLeftOutline14,
   IconCloseOutline16,
-  IconFolderOpenOutline16,
   IconPlusOutline16,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -27,9 +25,7 @@ import {
 import { AnimatedModal, Empty, Field } from '../shared.js'
 import { openTeam } from '../store.js'
 import { isTeamExecuting } from '../team-status.js'
-import type { WorkspaceChoice } from '../types.js'
 import { ConversationColumn } from '../workbench/ConversationColumn.js'
-import { WorkspacePanel } from '../workspace/WorkspacePanel.js'
 
 export function TeamPanel({
   catalog,
@@ -37,7 +33,6 @@ export function TeamPanel({
   teams,
   createRequest,
   selectedTeamId,
-  pickWorkspace,
   onChanged,
 }: {
   catalog: CatalogView | undefined
@@ -45,7 +40,6 @@ export function TeamPanel({
   teams: TeamView[]
   createRequest: number
   selectedTeamId: string | undefined
-  pickWorkspace: () => Promise<WorkspaceChoice | null>
   onChanged: () => Promise<void>
 }): JSX.Element {
   const [creating, setCreating] = useState(false)
@@ -71,7 +65,7 @@ export function TeamPanel({
       {selectedTeam === undefined && <div className={css.sectionHeader}>
         <div>
           <h2 className={css.sectionHeading}>团队 <span className={css.count}>{teams.length}</span></h2>
-          <p className={css.sectionDescription}>选择 Leader 和成员，共享同一个 Workspace 协作。</p>
+          <p className={css.sectionDescription}>选择 Leader 和成员，组建多个平级 Agent 的协作团队。</p>
         </div>
         <div className={css.sectionHeaderActions}>
           <Button variant="outline" onClick={() => { setManagingAssistants(true) }}>
@@ -91,7 +85,6 @@ export function TeamPanel({
                 team={team}
                 catalog={catalog}
                 assistants={assistants}
-                pickWorkspace={pickWorkspace}
                 onChanged={onChanged}
                 onCloned={async teamId => {
                   openTeam(teamId)
@@ -104,7 +97,6 @@ export function TeamPanel({
           catalog={catalog}
           assistants={assistants}
           permissionPresets={catalog?.permissionPresets ?? []}
-          pickWorkspace={pickWorkspace}
           onChanged={onChanged}
         />}
       <AnimatedModal
@@ -134,9 +126,7 @@ export function TeamPanel({
         contentClassName={css.teamCreateContent ?? ''}
       >
         <TeamForm
-          catalog={catalog}
           assistants={assistants}
-          pickWorkspace={pickWorkspace}
           onCancel={() => { setCreating(false) }}
           onCreated={async teamId => {
             setCreating(false)
@@ -154,14 +144,12 @@ function TeamWorkbench({
   catalog,
   assistants,
   permissionPresets,
-  pickWorkspace,
   onChanged,
 }: {
   team: TeamView
   catalog: CatalogView | undefined
   assistants: AssistantView[]
   permissionPresets: CatalogView['permissionPresets']
-  pickWorkspace: () => Promise<WorkspaceChoice | null>
   onChanged: () => Promise<void>
 }): JSX.Element {
   const members = Object.values(team.members)
@@ -175,8 +163,6 @@ function TeamWorkbench({
   const [managementOpen, setManagementOpen] = useState(false)
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [expandedSlotId, setExpandedSlotId] = useState<string>()
-  const [workspaceVisible, setWorkspaceVisible] = useState(true)
-  const [workspaceRefreshSignal, setWorkspaceRefreshSignal] = useState(0)
   const refreshTimer = useRef<ReturnType<typeof setTimeout>>()
   const loadGeneration = useRef(0)
   const previousMemberIds = useRef(memberIds)
@@ -198,7 +184,6 @@ function TeamWorkbench({
   useEffect(() => subscribeAgentTeamConversation(team.id, conversation => {
     if (conversation !== undefined) {
       loadGeneration.current += 1
-      setWorkspaceRefreshSignal(current => current + 1)
       setSnapshot(current => {
         if (current === undefined) return current
         const conversations = current.conversations.filter(item => item.slotId !== conversation.slotId)
@@ -301,17 +286,6 @@ function TeamWorkbench({
           )
         })}
         <span className={css.manageButtonWrap}>
-          {!workspaceVisible && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className={css.manageButton}
-              onClick={() => { setWorkspaceVisible(true) }}
-            >
-              <IconChevronLeftOutline14 size={14} />
-              Workspace
-            </Button>
-          )}
           <Button
             variant="ghost"
             size="sm"
@@ -358,13 +332,6 @@ function TeamWorkbench({
           </div>
         </div>
       </div>
-      {workspaceVisible && (
-        <WorkspacePanel
-          team={team}
-          refreshSignal={workspaceRefreshSignal}
-          onCollapse={() => { setWorkspaceVisible(false) }}
-        />
-      )}
       <AnimatedModal
         open={managementOpen}
         onClose={() => { setManagementOpen(false) }}
@@ -379,7 +346,6 @@ function TeamWorkbench({
             team={team}
             catalog={catalog}
             assistants={assistants}
-            pickWorkspace={pickWorkspace}
             onChanged={async () => { await onChanged(); await load() }}
             onCloned={async teamId => {
               setManagementOpen(false)
@@ -561,73 +527,34 @@ function AddTeamMemberDialog({
 function CloneTeamDialog({
   open,
   team,
-  catalog,
-  pickWorkspace,
   onClose,
   onCreated,
 }: {
   open: boolean
   team: TeamView
-  catalog: CatalogView | undefined
-  pickWorkspace: () => Promise<WorkspaceChoice | null>
   onClose: () => void
   onCreated: (teamId: string) => Promise<void>
 }): JSX.Element {
-  const catalogWorkspaces = catalog?.workspaces.filter(workspace => workspace.status === 'ok') ?? []
   const [name, setName] = useState(`${team.name} 副本`)
-  const [workspaceId, setWorkspaceId] = useState(team.workspaceId)
-  const [pickedWorkspace, setPickedWorkspace] = useState<WorkspaceChoice>()
   const [saving, setSaving] = useState(false)
-  const [pickingWorkspace, setPickingWorkspace] = useState(false)
   const [error, setError] = useState<string>()
   const members = Object.values(team.members)
-  const workspaces = useMemo(() => {
-    const items = [...catalogWorkspaces]
-    const fallback: WorkspaceChoice = pickedWorkspace ?? {
-      id: team.workspaceId,
-      path: team.workspacePath,
-      title: workspaceName(team.workspacePath),
-    }
-    if (!items.some(workspace => workspace.id === fallback.id)) {
-      items.push({ ...fallback, status: 'ok' as const })
-    }
-    return items
-  }, [catalogWorkspaces, pickedWorkspace, team.workspaceId, team.workspacePath])
 
   useEffect(() => {
     if (!open) return
     setName(`${team.name} 副本`)
-    setWorkspaceId(team.workspaceId)
-    setPickedWorkspace(undefined)
     setSaving(false)
-    setPickingWorkspace(false)
     setError(undefined)
-  }, [open, team.id, team.name, team.workspaceId])
-
-  async function chooseWorkspace(): Promise<void> {
-    setPickingWorkspace(true)
-    try {
-      const workspace = await pickWorkspace()
-      if (workspace === null) return
-      setPickedWorkspace(workspace)
-      setWorkspaceId(workspace.id)
-      setError(undefined)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setPickingWorkspace(false)
-    }
-  }
+  }, [open, team.id, team.name])
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault()
-    if (!name.trim() || !workspaceId) return
+    if (!name.trim()) return
     setSaving(true)
     try {
       const draft = await callAgentTeam('team.clone', {
         teamId: team.id,
         name,
-        workspaceId,
       })
       await callAgentTeam('team.start', { id: draft.id }, draft.revision)
       setError(undefined)
@@ -641,7 +568,7 @@ function CloneTeamDialog({
   }
 
   function close(): void {
-    if (saving || pickingWorkspace) return
+    if (saving) return
     onClose()
   }
 
@@ -667,29 +594,6 @@ function CloneTeamDialog({
               autoFocus
             />
           </Field>
-          <Field label="Workspace">
-            <div className={css.workspacePickerRow}>
-              <select
-                required
-                value={workspaceId}
-                onChange={event => { setWorkspaceId(event.target.value) }}
-                className={css.input}
-              >
-                <option value="">{workspaces.length === 0 ? '暂无 Workspace' : '请选择 Workspace'}</option>
-                {workspaces.map(item => <option key={item.id} value={item.id}>{item.title} — {item.path}</option>)}
-              </select>
-              <Button
-                variant="outline"
-                type="button"
-                disabled={pickingWorkspace || saving}
-                onClick={() => { void chooseWorkspace() }}
-                className={css.workspacePickButton}
-              >
-                <IconFolderOpenOutline16 size={16} />
-                {pickingWorkspace ? '选择中…' : '选择文件夹'}
-              </Button>
-            </div>
-          </Field>
         </div>
         <section className={css.cloneTeamMembers} aria-label="复制的团队成员">
           <div className={css.cloneTeamSectionHeader}>
@@ -712,8 +616,8 @@ function CloneTeamDialog({
         <p className={css.cloneTeamNotice}>不会复制任务、对话上下文、消息历史或运行状态。</p>
         {error && <div role="alert" className={css.inlineError}>{error}</div>}
         <div className={css.cloneTeamActions}>
-          <Button variant="outline" type="button" disabled={saving || pickingWorkspace} onClick={close}>取消</Button>
-          <Button variant="primary" type="submit" disabled={saving || pickingWorkspace || !name.trim() || !workspaceId}>
+          <Button variant="outline" type="button" disabled={saving} onClick={close}>取消</Button>
+          <Button variant="primary" type="submit" disabled={saving || !name.trim()}>
             {saving ? '复制并启动中…' : '复制并启动'}
           </Button>
         </div>
@@ -726,7 +630,6 @@ function TeamCard({
   team,
   catalog,
   assistants,
-  pickWorkspace,
   onChanged,
   onCloned,
   compact = false,
@@ -734,7 +637,6 @@ function TeamCard({
   team: TeamView
   catalog: CatalogView | undefined
   assistants: AssistantView[]
-  pickWorkspace: () => Promise<WorkspaceChoice | null>
   onChanged: () => Promise<void>
   onCloned: (teamId: string) => Promise<void>
   compact?: boolean
@@ -819,7 +721,6 @@ function TeamCard({
       <header className={css.teamCardHeader}>
         <div className={css.teamCardIdentity}>
           <strong className={css.teamCardName}>{team.name}</strong>
-          <span className={css.teamCardWorkspace}>{team.workspacePath}</span>
         </div>
         {executing && <span className={`${css.badge} ${css.badgeSuccess ?? ''}`}>任务执行中</span>}
       </header>
@@ -911,7 +812,7 @@ function TeamCard({
         <div className={css.contextResetPanel}>
           <div className={css.contextResetCopy}>
             <strong>清空任务与上下文</strong>
-            <span>停止所有成员并清空任务板，为每位成员换用全新 Session。Workspace 文件和团队配置不变。</span>
+          <span>停止所有成员并清空任务板，为每位成员换用全新 Session。团队配置不变。</span>
           </div>
           <button
             type="button"
@@ -929,7 +830,7 @@ function TeamCard({
       <div className={`${css.contextResetPanel} ${css.dissolvePanel}`}>
         <div className={css.contextResetCopy}>
           <strong>解散团队</strong>
-          <span>永久删除团队、任务和团队消息；助手模板与 Workspace 文件保留，旧 Session 日志不再恢复。</span>
+          <span>永久删除团队、任务和团队消息；助手模板保留，旧 Session 日志不再恢复。</span>
         </div>
         <button
           type="button"
@@ -956,8 +857,6 @@ function TeamCard({
       <CloneTeamDialog
         open={cloneOpen}
         team={team}
-        catalog={catalog}
-        pickWorkspace={pickWorkspace}
         onClose={() => { setCloneOpen(false) }}
         onCreated={onCloned}
       />
@@ -1042,7 +941,7 @@ function TeamCard({
           <div className={css.teamResetIcon} aria-hidden="true">↻</div>
           <div>
             <strong>确定清空“{team.name}”的任务与上下文？</strong>
-            <p>所有成员会停止，任务板和待处理消息会被清空，并换用全新 Session。Workspace 文件、团队配置和旧 Session 日志会保留。</p>
+            <p>所有成员会停止，任务板和待处理消息会被清空，并换用全新 Session。团队配置和旧 Session 日志会保留。</p>
           </div>
           {error && <div role="alert" className={css.inlineError}>{error}</div>}
         </div>
@@ -1085,7 +984,7 @@ function TeamCard({
           <div className={css.teamDissolveIcon} aria-hidden="true">!</div>
           <div>
             <strong>确定解散“{team.name}”？</strong>
-            <p>所有成员将停止，团队任务、消息和配置会被永久删除。助手模板与 Workspace 文件会保留。</p>
+            <p>所有成员将停止，团队任务、消息和配置会被永久删除。助手模板会保留。</p>
           </div>
           {error && <div role="alert" className={css.inlineError}>{error}</div>}
         </div>
@@ -1099,41 +998,22 @@ interface DraftMember {
   assistantId: string
 }
 
-function workspaceName(path: string): string {
-  const normalized = path.replace(/[/\\]+$/, '')
-  return normalized.split(/[/\\]/).at(-1) || 'Workspace'
-}
-
 function TeamForm({
-  catalog,
   assistants,
-  pickWorkspace,
   onCancel,
   onCreated,
 }: {
-  catalog: CatalogView | undefined
   assistants: AssistantView[]
-  pickWorkspace: () => Promise<WorkspaceChoice | null>
   onCancel: () => void
   onCreated: (teamId: string) => Promise<void>
 }): JSX.Element {
-  const catalogWorkspaces = catalog?.workspaces.filter(workspace => workspace.status === 'ok') ?? []
   const [name, setName] = useState('')
-  const [workspaceId, setWorkspaceId] = useState(catalogWorkspaces[0]?.id ?? '')
-  const [pickedWorkspace, setPickedWorkspace] = useState<WorkspaceChoice>()
   const [query, setQuery] = useState('')
   const [members, setMembers] = useState<DraftMember[]>([])
   const [leaderKey, setLeaderKey] = useState<string>()
   const [directMemberChat, setDirectMemberChat] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [pickingWorkspace, setPickingWorkspace] = useState(false)
   const [error, setError] = useState<string>()
-  const workspaces = useMemo(() => {
-    if (pickedWorkspace === undefined || catalogWorkspaces.some(workspace => workspace.id === pickedWorkspace.id)) {
-      return catalogWorkspaces
-    }
-    return [...catalogWorkspaces, { ...pickedWorkspace, status: 'ok' as const }]
-  }, [catalogWorkspaces, pickedWorkspace])
   const byId = useMemo(() => new Map(assistants.map(assistant => [assistant.id, assistant])), [assistants])
   const filteredAssistants = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
@@ -1141,23 +1021,6 @@ function TeamForm({
     return assistants.filter(assistant => [assistant.name, assistant.description, assistant.provider, assistant.model]
       .some(value => value?.toLocaleLowerCase().includes(normalized)))
   }, [assistants, query])
-
-  useEffect(() => { if (!workspaceId && workspaces[0]) setWorkspaceId(workspaces[0].id) }, [workspaceId, workspaces])
-
-  async function chooseWorkspace(): Promise<void> {
-    setPickingWorkspace(true)
-    try {
-      const workspace = await pickWorkspace()
-      if (workspace === null) return
-      setPickedWorkspace(workspace)
-      setWorkspaceId(workspace.id)
-      setError(undefined)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setPickingWorkspace(false)
-    }
-  }
 
   function addAssistant(assistant: AssistantView): void {
     const member: DraftMember = {
@@ -1181,7 +1044,6 @@ function TeamForm({
     try {
       const draft = await callAgentTeam('team.createDraft', {
         name,
-        workspaceId,
         directMemberChat,
         members: members.map(member => ({
           assistantId: member.assistantId,
@@ -1198,7 +1060,6 @@ function TeamForm({
   }
 
   const canSubmit = name.trim().length > 0
-    && workspaceId.length > 0
     && leaderKey !== undefined
     && members.length > 0
 
@@ -1287,24 +1148,6 @@ function TeamForm({
           <div className={css.teamFields}>
             <Field label="团队名称">
               <input required value={name} onChange={event => { setName(event.target.value) }} placeholder="输入团队名称" className={css.input} />
-            </Field>
-            <Field label="Workspace">
-              <div className={css.workspacePickerRow}>
-                <select required value={workspaceId} onChange={event => { setWorkspaceId(event.target.value) }} className={css.input}>
-                  <option value="">{workspaces.length === 0 ? '暂无 Workspace' : '请选择 Workspace'}</option>
-                  {workspaces.map(item => <option key={item.id} value={item.id}>{item.title} — {item.path}</option>)}
-                </select>
-                <Button
-                  variant="outline"
-                  type="button"
-                  disabled={pickingWorkspace || saving}
-                  onClick={() => { void chooseWorkspace() }}
-                  className={css.workspacePickButton}
-                >
-                  <IconFolderOpenOutline16 size={16} />
-                  {pickingWorkspace ? '选择中…' : '选择文件夹'}
-                </Button>
-              </div>
             </Field>
             <label className={css.checkboxRow}>
               <input type="checkbox" checked={directMemberChat} onChange={event => { setDirectMemberChat(event.target.checked) }} />

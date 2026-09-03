@@ -31,7 +31,7 @@ describe('taskStatusLabel', () => {
   it('keeps PERMISSION_LABELS intact', () => {
     expect(PERMISSION_LABELS).toEqual({
       'read-only': '只读',
-      'workspace-write': '工作区可写',
+      'workspace-write': '允许写入文件',
       'danger-full-access': '完全访问',
     })
   })

@@ -9,7 +9,6 @@ import type {
   createTeamMemberInputSchema,
   fileScopeLeaseSchema,
   memberRuntimeStateSchema,
-  operationSchema,
   retiredMemberSessionSchema,
   teamActivitySchema,
   teamAggregateSchema,
@@ -31,7 +30,6 @@ export type FileScopeLease = z.infer<typeof fileScopeLeaseSchema>
 export type TeamAggregate = z.infer<typeof teamAggregateSchema>
 export type TeamMessage = z.infer<typeof teamMessageSchema>
 export type TeamActivity = z.infer<typeof teamActivitySchema>
-export type Operation = z.infer<typeof operationSchema>
 export type CreateTeamMemberInput = z.infer<typeof createTeamMemberInputSchema>
 export type AddTeamMemberInput = z.infer<typeof addTeamMemberInputSchema>
 export type CreateTeamDraftInput = z.infer<typeof createTeamDraftInputSchema>

@@ -2,16 +2,16 @@
 
 [English](./README.md) | 简体中文
 
-![Agent Team——独立 Agent，共享 Workspace](./demo/github-banner.png)
+![Agent Team——独立 Agent 团队协作](./demo/github-banner.png)
 
 [![npm version](https://img.shields.io/npm/v/@limuyang2/dsh-agent-team.svg)](https://www.npmjs.com/package/@limuyang2/dsh-agent-team)
 [![license](https://img.shields.io/npm/l/@limuyang2/dsh-agent-team.svg)](https://www.npmjs.com/package/@limuyang2/dsh-agent-team)
 
 当前版本：`0.1.4`
 
-在 DeepSeek Harness 中组建由多个独立 AI Agent 构成的团队。你可以混用不同模型和 Provider，指定唯一 Leader，让每位成员拥有独立对话和上下文，同时在同一个 Workspace 中协作。
+在 DeepSeek Harness 中组建由多个独立 AI Agent 构成的团队。你可以混用不同模型和 Provider，指定唯一 Leader，让每位成员拥有独立对话和上下文。
 
-Agent Team **不是 Subagent 方案**。每位成员都是独立的根级 Agent，拥有自己的模型、Session、上下文、权限、思考模式和工具调用；团队任务、消息和共享 Workspace 构成协作层。
+Agent Team **不是 Subagent 方案**。每位成员都是独立的根级 Agent，拥有自己的模型、Session、上下文、权限、思考模式和工具调用；团队任务和消息构成协作层。
 
 ![Agent Team 多成员工作台](./demo/4.png)
 
@@ -42,8 +42,8 @@ Agent Team 允许为每位成员设置明确、专注的配置：
 | 角色 | 模型 | 专属配置与职责 |
 | --- | --- | --- |
 | 架构 Leader | GPT | 理解需求、设计方案、拆解任务、协调成员并验收结果 |
-| 编码 Agent | GLM | 加载编码 Skills 和开发类 MCP 工具，修改 Workspace 并执行测试 |
-| Commit 助手 | DeepSeek Flash | 使用只读权限查看 Git 状态和 Diff，生成符合规范的提交信息 |
+| 编码 Agent | GLM | 加载编码 Skills 和开发类 MCP 工具，修改文件并执行测试 |
+| 审查助手 | DeepSeek Flash | 使用只读权限检查结果并总结风险 |
 
 GPT Leader 的上下文只保留关键决策、任务状态和验收结果，不必塞入所有编码细节；GLM 获取代码执行所需的仓库上下文和工具；DeepSeek Flash 快速处理范围明确的 Commit 任务，无需继续消耗 Leader 的高等级模型，也不必加载编码 Agent 的庞大工具目录。
 
@@ -53,30 +53,23 @@ GPT Leader 的上下文只保留关键决策、任务状态和验收结果，不
 用户目标 → GPT Leader 规划并分派任务
         → GLM 编码 Agent 实现并回报测试结果
         → GPT Leader 验收产出
-        → DeepSeek Flash Commit 助手根据 Git Diff 生成提交信息
+        → DeepSeek Flash 审查助手检查结果并总结风险
 ```
 
 ## 你可以做什么
 
 - 创建用于规划、编码、测试、评审、文档等职责的可复用助手。
 - 在一个团队中混用不同 Provider 和模型，例如 Codex Leader 配合 GLM 编码成员。
-- 手动创建助手，或向内置的“团队 Agent 小助手”描述角色，由它协助生成配置。
+- 手动创建助手，为规划、编码、评审等职责配置角色规则。
 - 多次添加同一个助手，每次都会成为独立的团队成员实例。
 - 并排查看所有成员的流式输出、Markdown、Think 和工具调用。
 - 让 Leader 创建任务、分派成员、跟踪进度并收集结果。
 - 与 Leader 直接沟通；启用对应策略后，也可直接与普通成员沟通。
 - 在运行时调整单个成员当前 Session 的权限和思考模式。
-- 查看已加载 Skills、上下文占用、Token 统计和缓存命中率。
-- 浏览共享 Workspace，并预览 Git 文件变更和 Diff。
+- 查看当前成员加载的 Skills。
 - 动态添加或移出成员、更换 Leader、清空全部上下文或解散团队。
 
 ## 界面预览
-
-### 通过对话创建助手
-
-描述你需要的角色。内置小助手会补充询问必要配置、整理长期指令，并在你确认后创建助手。
-
-![通过对话创建助手](./demo/1.png)
 
 ### 可复用助手库
 
@@ -88,7 +81,7 @@ GPT Leader 的上下文只保留关键决策、任务状态和验收结果，不
 
 ### 组建团队
 
-选择成员、指定唯一 Leader、选择 Workspace，并决定是否允许用户直接与普通成员通信。
+选择成员、指定唯一 Leader，并决定是否允许用户直接与普通成员通信。
 
 ![组建团队](./demo/3.png)
 
@@ -146,7 +139,7 @@ dsh plugin add --save-exact @limuyang2/dsh-agent-team@0.1.4
 npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 ```
 
-命令完成后重新启动 Harness。卸载插件不会修改 DeepSeek Harness 源码，也不会删除团队 Workspace 中的文件。
+命令完成后重新启动 Harness。卸载插件不会修改 DeepSeek Harness 源码。
 
 ## 快速开始
 
@@ -198,7 +191,7 @@ npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 
 1. 从助手列表添加成员；同一助手可以添加多次。
 2. 指定且仅指定一个 Leader。
-3. 输入团队名称并选择 Workspace。
+3. 输入团队名称。
 4. 选择是否允许用户直接与普通成员通信。
 5. 点击 **创建并启动**。
 
@@ -214,12 +207,10 @@ npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 
 - **成员标签**：控制对话列的显示与隐藏；鼠标悬停在非 Leader 标签上可以移出成员。
 - **对话标题**：展示角色、Provider、模型、思考模式和实时状态；双击可以放大该成员对话。
-- **输入框**：发送消息；输入 `/` 调用当前成员允许的 Skill；输入 `@` 搜索并引用 Workspace 文件；也可上传本地文件、停止输出和修改运行配置。
+- **输入框**：发送消息；输入 `/` 调用当前成员允许的 Skill；也可停止输出和修改运行配置。
 - **权限**：只影响当前成员的当前 Session；助手模板仅提供初始默认值。
 - **思考模式**：从下一轮开始生效，只展示当前模型支持的档位。
 - **Info**：查看成员当前加载的 Skills。
-- **上下文圆环**：查看上下文占用、输入/输出 Token 和缓存命中率。
-- **Workspace**：浏览文件、手动刷新、自动跟踪文件变化并预览 Git Diff。
 
 ## Agent 如何协作
 
@@ -232,15 +223,15 @@ Leader 和成员通过明确的团队工具与消息通信：
 - 需要澄清时，成员可以发送团队消息。
 - 成员加入或移出会携带稳定成员 ID 通知 Leader。
 
-成员共享 Workspace，但不共享聊天上下文。这样既能在同一份文件上工作，又能保持角色和模型上下文相互隔离。
+成员不共享聊天上下文，从而保持角色和模型上下文相互隔离。
 
 ## 团队管理
 
 - **添加成员**：基于助手快照启动新的独立成员，并通知 Leader。
 - **移出成员**：停止并归档该成员 Session，从团队中移除并通知 Leader。
 - **更换 Leader**：只变更团队角色，不替换成员当前 Session。
-- **清空任务与上下文**：停止所有成员，清空任务和排队消息，为所有保留成员换用全新 Session；团队配置和 Workspace 文件不变。
-- **解散团队**：永久删除团队、任务和团队消息，但不会删除助手模板或 Workspace 文件。
+- **清空任务与上下文**：停止所有成员，清空任务和排队消息，为所有保留成员换用全新 Session；团队配置不变。
+- **解散团队**：永久删除团队、任务和团队消息，但不会删除助手模板。
 
 助手加入团队时会生成配置快照。之后编辑助手不会热更新已经运行的成员；要应用新配置，需要移出旧成员并重新添加。
 
@@ -249,8 +240,6 @@ Leader 和成员通过明确的团队工具与消息通信：
 - 助手模板中的权限只是成员首次启动的默认权限。
 - 思考模式来源于 Harness 返回的模型能力，插件不会伪造模型不支持的参数。
 - MCP 凭据保留在 Harness Profile 中，助手模板只保存允许使用的 Server 名称。
-- 从 Workspace 外选择的文件会复制到 `.agent-team/uploads/`，确保 Agent 可以稳定读取。
-- “变更”页签要求 Workspace 本身是 Git 仓库，普通目录仍可浏览文件。
 - Harness 当前没有物理删除单个 Session 日志的公开 API。清空或解散后的旧 Session 不再由 Agent Team 恢复或使用，但日志可能继续保留在 Harness 存储中。
 
 ## 常见问题
@@ -271,10 +260,6 @@ Leader 和成员通过明确的团队工具与消息通信：
 
 该助手仍被团队成员引用。先移出对应成员或解散相关团队。
 
-### 没有显示 Git 变更
-
-确认所选 Workspace 本身就是 Git 仓库。位于普通 Workspace 子目录中的仓库不会被当作 Workspace 仓库。
-
 ## 用户文档
 
 - [文档首页](./docs/README.md)
@@ -282,7 +267,6 @@ Leader 和成员通过明确的团队工具与消息通信：
 - [助手库](./docs/assistants.md)
 - [创建团队](./docs/creating-teams.md)
 - [工作台与协作](./docs/workbench.md)
-- [Workspace 与 Git 变更](./docs/workspace.md)
 - [团队管理](./docs/team-management.md)
 - [故障排查](./docs/troubleshooting.md)
 

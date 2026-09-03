@@ -2,7 +2,6 @@ import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
   IconCloseOutline16,
-  IconPaperclipOutline16,
   IconSendOutline16,
   IconStopFill16,
   MarkdownText,
@@ -14,9 +13,8 @@ import type {
   ConversationNode,
   MemberConversationView,
   TeamView,
-  WorkspaceUploadView,
 } from '../../transport/contracts.js'
-import { callAgentTeam, uploadAgentTeamFile } from '../api.js'
+import { callAgentTeam } from '../api.js'
 import {
   composerTriggerAt,
   matchingUserSkills,
@@ -26,7 +24,6 @@ import {
 } from '../composer-triggers.js'
 import css from './ConversationColumn.module.css'
 import { mergeConversationNodes } from '../conversation-nodes.js'
-import { insertWorkspaceFileMention, workspaceFileMention } from '../file-mentions.js'
 import { CrownIcon } from '../icons/CrownIcon.js'
 import { DeepThinkIcon } from '../icons/DeepThinkIcon.js'
 import { shouldSubmitComposer } from '../keyboard.js'
@@ -73,7 +70,6 @@ export function ConversationColumn({
   const [reasoningEffort, setReasoningEffort] = useState(member.reasoningEffort ?? '')
   const [error, setError] = useState<string>()
   const [pendingMessages, setPendingMessages] = useState<ConversationNode[]>([])
-  const [uploadingFiles, setUploadingFiles] = useState(false)
   const [composerTrigger, setComposerTrigger] = useState<ComposerTrigger>()
   const [composerCandidates, setComposerCandidates] = useState<ComposerCandidate[]>([])
   const [composerCandidateIndex, setComposerCandidateIndex] = useState(0)
@@ -81,8 +77,6 @@ export function ConversationColumn({
   const [composerCandidatesError, setComposerCandidatesError] = useState<string>()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composerTriggerOptionsRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const fileInsertionPoint = useRef({ start: 0, end: 0 })
   const timelineRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
   const composing = useRef(false)
@@ -145,49 +139,22 @@ export function ConversationColumn({
       return
     }
     const query = composerTrigger.query.toLocaleLowerCase()
-    if (composerTrigger.kind === 'skill') {
-      setComposerCandidates([])
-      setComposerCandidatesLoading(true)
-      const timer = window.setTimeout(() => {
-        void callAgentTeam('skill.catalog', {
-          agentPresetId: member.assistantSnapshot.agentPresetId,
-        }).then(catalog => {
-          if (generation !== composerCandidateGeneration.current) return
-          const selected = new Set(member.assistantSnapshot.skillAllowlist)
-          const candidates = matchingUserSkills(catalog.skills, selected, query)
-            .map(skill => ({
-              id: `skill:${skill.name}`,
-              label: `/${skill.name}`,
-              description: skill.description,
-              replacement: `/${skill.name}`,
-            }))
-          setComposerCandidates(candidates)
-          setComposerCandidatesLoading(false)
-        }).catch(cause => {
-          if (generation !== composerCandidateGeneration.current) return
-          setComposerCandidates([])
-          setComposerCandidatesLoading(false)
-          setComposerCandidatesError(cause instanceof Error ? cause.message : String(cause))
-        })
-      }, 100)
-      return () => { window.clearTimeout(timer) }
-    }
-
     setComposerCandidates([])
     setComposerCandidatesLoading(true)
     const timer = window.setTimeout(() => {
-      void callAgentTeam('team.workspace.search', {
-        teamId: team.id,
-        query: composerTrigger.query,
-        limit: 40,
-      }).then(entries => {
+      void callAgentTeam('skill.catalog', {
+        agentPresetId: member.assistantSnapshot.agentPresetId,
+      }).then(catalog => {
         if (generation !== composerCandidateGeneration.current) return
-        setComposerCandidates(entries.map(entry => ({
-          id: `file:${entry.path}`,
-          label: entry.path,
-          description: 'Workspace 文件',
-          replacement: workspaceFileMention(entry.path),
-        })))
+        const selected = new Set(member.assistantSnapshot.skillAllowlist)
+        const candidates = matchingUserSkills(catalog.skills, selected, query)
+          .map(skill => ({
+            id: `skill:${skill.name}`,
+            label: `/${skill.name}`,
+            description: skill.description,
+            replacement: `/${skill.name}`,
+          }))
+        setComposerCandidates(candidates)
         setComposerCandidatesLoading(false)
       }).catch(cause => {
         if (generation !== composerCandidateGeneration.current) return
@@ -195,9 +162,9 @@ export function ConversationColumn({
         setComposerCandidatesLoading(false)
         setComposerCandidatesError(cause instanceof Error ? cause.message : String(cause))
       })
-    }, 140)
+    }, 100)
     return () => { window.clearTimeout(timer) }
-  }, [composerTrigger?.kind, composerTrigger?.query, skillNamesKey, team.id])
+  }, [composerTrigger?.query, skillNamesKey, member.assistantSnapshot.agentPresetId])
 
   useEffect(() => {
     const container = composerTriggerOptionsRef.current
@@ -323,40 +290,6 @@ export function ConversationColumn({
     }
   }
 
-  async function uploadFiles(files: FileList | null): Promise<void> {
-    const selected = Array.from(files ?? [])
-    if (selected.length === 0 || uploadingFiles) return
-    setUploadingFiles(true)
-    try {
-      const uploads: WorkspaceUploadView[] = []
-      for (const file of selected) uploads.push(await uploadAgentTeamFile(team.id, file))
-      let nextCursor = fileInsertionPoint.current.start
-      setContent(current => {
-        let nextValue = current
-        let selectionStart = Math.min(fileInsertionPoint.current.start, current.length)
-        let selectionEnd = Math.min(fileInsertionPoint.current.end, current.length)
-        for (const upload of uploads) {
-          const inserted = insertWorkspaceFileMention(nextValue, selectionStart, selectionEnd, upload.path)
-          nextValue = inserted.value
-          nextCursor = inserted.cursor
-          selectionStart = inserted.cursor
-          selectionEnd = inserted.cursor
-        }
-        return nextValue
-      })
-      setError(undefined)
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus()
-        textareaRef.current?.setSelectionRange(nextCursor, nextCursor)
-      })
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (fileInputRef.current !== null) fileInputRef.current.value = ''
-      setUploadingFiles(false)
-    }
-  }
-
   return (
     <section
       className={`${css.conversationColumn} ${expanded ? css.conversationColumnExpanded : ''}`}
@@ -440,10 +373,10 @@ export function ConversationColumn({
             id={composerMenuId}
             className={css.composerTriggerMenu}
             role="listbox"
-            aria-label={composerTrigger.kind === 'skill' ? 'Skill 候选' : 'Workspace 文件候选'}
+            aria-label="Skill 候选"
           >
             <div className={css.composerTriggerHeading}>
-              <strong>{composerTrigger.kind === 'skill' ? 'Skills' : 'Workspace 文件'}</strong>
+              <strong>Skills</strong>
               <span>↑↓ 选择 · Enter 插入 · Esc 关闭</span>
             </div>
             <div ref={composerTriggerOptionsRef} className={css.composerTriggerOptions}>
@@ -469,9 +402,7 @@ export function ConversationColumn({
               )}
               {!composerCandidatesLoading && composerCandidatesError === undefined && composerCandidates.length === 0 && (
                 <span className={css.composerTriggerEmpty}>
-                  {composerTrigger.kind === 'skill'
-                    ? '当前成员没有匹配的已加载 Skill'
-                    : '没有匹配的 Workspace 文件'}
+                  当前成员没有匹配的已加载 Skill
                 </span>
               )}
             </div>
@@ -524,7 +455,7 @@ export function ConversationColumn({
             event.preventDefault()
             event.currentTarget.form?.requestSubmit()
           }}
-          disabled={!canChat || uploadingFiles}
+          disabled={!canChat}
           placeholder={!canChat ? '当前不可直接对话' : `发送消息到 ${member.displayName}…`}
           aria-controls={composerTrigger === undefined ? undefined : composerMenuId}
           aria-expanded={composerTrigger !== undefined}
@@ -535,30 +466,6 @@ export function ConversationColumn({
         />
         <div className={css.composerFooter}>
           <div className={css.composerUtilities}>
-            <button
-              type="button"
-              className={`${css.composerIconButton} ${css.composerAttachButton}`}
-              disabled={!canChat || uploadingFiles}
-              aria-label={uploadingFiles ? '正在上传文件' : '选择文件'}
-              onClick={() => {
-                const textarea = textareaRef.current
-                fileInsertionPoint.current = {
-                  start: textarea?.selectionStart ?? content.length,
-                  end: textarea?.selectionEnd ?? content.length,
-                }
-                fileInputRef.current?.click()
-              }}
-            >
-              <IconPaperclipOutline16 size={16} />
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className={css.hiddenFileInput}
-              multiple
-              tabIndex={-1}
-              onChange={event => { void uploadFiles(event.currentTarget.files) }}
-            />
             <select
               className={css.permissionSelect}
               aria-label={`${member.displayName} 权限`}
@@ -597,9 +504,6 @@ export function ConversationColumn({
           </div>
           <div className={css.composerActions}>
             <AssistantSkillsInfo skills={member.assistantSnapshot.skillAllowlist} />
-            {conversation?.contextUsage !== undefined && (
-              <ContextUsageMeter usage={conversation.contextUsage} />
-            )}
             {running && (
               <Tooltip label={stopping ? '停止中…' : '停止生成'} side="top" delayMs={400}>
                 <button
@@ -617,7 +521,7 @@ export function ConversationColumn({
               <button
                 type="submit"
                 className={css.composerIconButton}
-                disabled={!canChat || sending || uploadingFiles || !content.trim()}
+                disabled={!canChat || sending || !content.trim()}
                 aria-label={sending ? '发送中' : '发送消息'}
               >
                 <IconSendOutline16 size={16} />
@@ -665,65 +569,6 @@ function InfoIcon({ size }: { size: number }): JSX.Element {
       <circle cx="8" cy="5" r="1" fill="currentColor" />
       <path d="M8 7.5V11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
-  )
-}
-
-function ContextUsageMeter({
-  usage,
-}: {
-  usage: NonNullable<MemberConversationView['contextUsage']>
-}): JSX.Element {
-  const percent = usage.contextWindow === undefined
-    ? undefined
-    : Math.min(100, Math.round(usage.usedTokens / usage.contextWindow * 100))
-  const pressureClass = percent !== undefined && percent >= 90
-    ? css.contextUsageCritical
-    : percent !== undefined && percent >= 75
-      ? css.contextUsageWarning
-      : ''
-  const cacheHitPercent = usage.inputTokens === 0
-    ? 0
-    : Math.round(usage.cacheReadTokens / usage.inputTokens * 100)
-  const details = [
-    `输入 ${formatTokenCount(usage.inputTokens)}`,
-    `输出 ${formatTokenCount(usage.outputTokens)}`,
-    `缓存命中 ${cacheHitPercent}%`,
-    ...(usage.cacheWriteTokens > 0 ? [`缓存写 ${formatTokenCount(usage.cacheWriteTokens)}`] : []),
-    ...(usage.reasoningTokens > 0 ? [`思考 ${formatTokenCount(usage.reasoningTokens)}`] : []),
-  ]
-  return (
-    <div className={`${css.contextUsage} ${pressureClass}`}>
-      <button
-        type="button"
-        className={css.contextUsageButton}
-        aria-label={percent === undefined
-          ? `已使用约 ${usage.usedTokens} tokens，上下文窗口大小未知`
-          : `上下文已使用约 ${usage.usedTokens} / ${usage.contextWindow} tokens，${percent}%`}
-      >
-        <svg className={css.contextUsageRing} viewBox="0 0 36 36" aria-hidden="true">
-          <circle className={css.contextUsageRingTrack} cx="18" cy="18" r="14" />
-          {percent !== undefined && (
-            <circle
-              className={css.contextUsageRingValue}
-              cx="18"
-              cy="18"
-              r="14"
-              pathLength="100"
-              strokeDasharray={`${percent} 100`}
-            />
-          )}
-        </svg>
-      </button>
-      <div className={css.contextUsagePopover} role="tooltip">
-        <strong>已使用 {formatTokenCount(usage.usedTokens)} tokens</strong>
-        <span>
-          {usage.contextWindow === undefined
-            ? '上下文窗口大小未知'
-            : `上下文窗口 ${formatTokenCount(usage.contextWindow)} · 已用 ${percent}%`}
-        </span>
-        <span>{details.join(' · ')}</span>
-      </div>
-    </div>
   )
 }
 
@@ -861,16 +706,6 @@ function ToolCard({ node }: { node: Extract<ConversationNode, { kind: 'tool' }> 
       {node.error && <div className={css.toolError}>{node.error}</div>}
     </details>
   )
-}
-
-function formatTokenCount(value: number): string {
-  if (value < 1_000) return String(value)
-  if (value < 1_000_000) {
-    const scaled = value / 1_000
-    return `${scaled >= 100 ? Math.round(scaled) : scaled.toFixed(1).replace(/\.0$/, '')}k`
-  }
-  const scaled = value / 1_000_000
-  return `${scaled >= 100 ? Math.round(scaled) : scaled.toFixed(1).replace(/\.0$/, '')}m`
 }
 
 function prettyJson(value: string): string {

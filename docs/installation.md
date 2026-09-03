@@ -96,7 +96,7 @@ npx @deepseek-ai/dsh plugin --profile web remove @limuyang2/dsh-agent-team
 
 该命令会从 `web` Profile 中移除插件依赖及其配置层。命令完成后重新启动 Harness，侧边栏和设置中的 Agent Team 入口将不再加载。
 
-卸载插件不会修改 DeepSeek Harness 源码，也不会删除团队 Workspace 中的文件。插件自身保存的助手模板、团队记录和 Session 引用是否继续保留，取决于 Harness Profile 数据目录是否仍存在；如需彻底清理这些数据，请先备份并自行处理对应 Profile 数据目录。
+卸载插件不会修改 DeepSeek Harness 源码。插件自身保存的助手模板、团队记录和 Session 引用是否继续保留，取决于 Harness Profile 数据目录是否仍存在；如需彻底清理这些数据，请先备份并自行处理对应 Profile 数据目录。
 
 ## 下一步
 

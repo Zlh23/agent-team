@@ -576,15 +576,6 @@
   text-overflow: ellipsis;
 }
 
-.teamCardWorkspace {
-  overflow: hidden;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .row {
   display: flex;
   align-items: center;
@@ -1496,23 +1487,6 @@
 
 .teamFields .checkboxRow {
   grid-column: 1 / -1;
-}
-
-.workspacePickerRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.workspacePickerRow .input {
-  flex: 1;
-  min-width: 0;
-}
-
-.workspacePickButton {
-  flex: none;
-  white-space: nowrap;
 }
 
 .teamBuilderActions {
@@ -2718,11 +2692,6 @@ textarea.input {
 
   .teamFields .checkboxRow {
     grid-column: auto;
-  }
-
-  .workspacePickerRow {
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .fullWidth {

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service } from '@deepseek-ai/cordis'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { isModelInvocable, isSkillName, isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Config } from '../config.js'
 import { AgentTeamError } from '../domain/errors.js'
@@ -19,7 +18,6 @@ import {
   type CloneTeamInput,
   type CreateAssistantInput,
   type CreateTeamDraftInput,
-  type Operation,
   type Page,
   type TeamActivity,
   type TeamAggregate,
@@ -28,20 +26,11 @@ import {
   type UpdateAssistantInput,
 } from '../domain/types.js'
 import type { AgentTeamStore } from '../storage/store.js'
-import type { AssistantBuilderRuntime } from '../runtime/assistant-builder-runtime.js'
 import type { TeamRuntime } from '../runtime/team-runtime.js'
-import { WorkspaceService } from './workspace-service.js'
 import type {
-  AssistantBuilderConversationView,
-  AssistantBuilderConversationListView,
-  AssistantBuilderDraftView,
   InteractionResponseInput,
   MemberConversationView,
   TeamWorkbenchView,
-  WorkspaceEntryView,
-  WorkspaceGitStatusView,
-  WorkspaceGitDiffView,
-  WorkspaceUploadView,
 } from '../transport/contracts.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -56,12 +45,11 @@ export interface MutationOptions {
 
 export interface AgentTeamChange {
   cursor: number
-  entityType: 'assistant' | 'assistant-builder' | 'team' | 'operation' | 'conversation' | 'workspace' | 'catalog'
+  entityType: 'assistant' | 'team' | 'conversation' | 'catalog'
   entityId: string
   revision: number
   kind: string
   conversation?: MemberConversationView
-  assistantBuilderConversation?: AssistantBuilderConversationView
 }
 
 export interface CatalogSnapshot {
@@ -69,12 +57,6 @@ export interface CatalogSnapshot {
   models: Record<string, Array<{ id: string; name: string; description?: string }>>
   agentPresets: Array<{ id: string; name: string; description?: string; broken?: string }>
   permissionPresets: Array<ReturnType<Context['permissionPresets']['optionOf']>>
-  workspaces: Array<{
-    id: string
-    path: string
-    title: string
-    status: 'ok' | 'missing-dir'
-  }>
 }
 
 export interface SkillCatalogSnapshot {
@@ -107,7 +89,7 @@ export interface McpCatalogSnapshot {
 
 const PERMISSION_PRESET_LABELS: Readonly<Record<string, string>> = {
   'read-only': '只读',
-  'workspace-write': '工作区可写',
+  'workspace-write': '允许写入文件',
   'danger-full-access': '完全访问',
   standard: '标准',
 }
@@ -116,8 +98,6 @@ export class AgentTeamService extends Service {
   private readonly listeners = new Set<(change: AgentTeamChange) => void>()
   private cursor = 0
   private runtime?: TeamRuntime
-  private assistantBuilderRuntime?: AssistantBuilderRuntime
-  private readonly workspace: WorkspaceService
 
   constructor(
     ctx: Context,
@@ -125,17 +105,6 @@ export class AgentTeamService extends Service {
     private readonly store: AgentTeamStore,
   ) {
     super(ctx, 'agentTeam')
-    this.workspace = new WorkspaceService(
-      ctx,
-      store,
-      teamId => {
-        const team = this.store.getTeam(teamId)
-        if (team !== undefined) this.publish('workspace', teamId, team.revision, 'workspace.changed')
-      },
-      (teamId, error) => {
-        this.ctx.logger.warn(`agent-team: Workspace watcher failed for team '${teamId}'`, error)
-      },
-    )
     ctx.on('llm/adapters-updated', () => {
       this.publish('catalog', 'models', 0, 'catalog.models_updated')
     })
@@ -151,19 +120,6 @@ export class AgentTeamService extends Service {
     this.runtime = runtime
   }
 
-  attachAssistantBuilderRuntime(runtime: AssistantBuilderRuntime): void {
-    if (this.assistantBuilderRuntime !== undefined) throw new Error('Assistant Builder runtime is already attached')
-    this.assistantBuilderRuntime = runtime
-  }
-
-  startWorkspaceTracking(): void {
-    this.workspace.startTracking()
-  }
-
-  disposeWorkspaceTracking(): Promise<void> {
-    return this.workspace.dispose()
-  }
-
   async catalog(): Promise<CatalogSnapshot> {
     const providers = this.ctx.llm.listProviders()
     const modelEntries = await Promise.all(providers.map(async provider => [
@@ -175,12 +131,6 @@ export class AgentTeamService extends Service {
       })),
     ] as const))
     const presets = await this.ctx.agentPresets.list()
-    const workspaces = await Promise.all(this.ctx.workspaceRegistry.list().map(async workspace => ({
-      id: String(workspace.id),
-      path: workspace.path,
-      title: workspace.title,
-      status: await workspace.status(),
-    })))
     return {
       providers,
       models: Object.fromEntries(modelEntries),
@@ -197,7 +147,6 @@ export class AgentTeamService extends Service {
           name: PERMISSION_PRESET_LABELS[option.value] ?? option.name,
         }
       }),
-      workspaces,
     }
   }
 
@@ -376,58 +325,6 @@ export class AgentTeamService extends Service {
     this.publish('assistant', id, assistant.revision + 1, 'assistant.deleted')
   }
 
-  listAssistantBuilderConversations(): Promise<AssistantBuilderConversationListView> {
-    return this.requireAssistantBuilderRuntime().listConversations()
-  }
-
-  getAssistantBuilderDraft(): Promise<AssistantBuilderDraftView> {
-    return this.requireAssistantBuilderRuntime().getDraft()
-  }
-
-  configureAssistantBuilderDraft(provider: string, model: string): Promise<AssistantBuilderDraftView> {
-    return this.requireAssistantBuilderRuntime().configureDraft(provider, model)
-  }
-
-  startAssistantBuilderConversation(
-    provider: string,
-    model: string,
-    content: string,
-  ): Promise<AssistantBuilderConversationView> {
-    return this.requireAssistantBuilderRuntime().startConversation(provider, model, content)
-  }
-
-  getAssistantBuilderConversation(sessionId: string): Promise<AssistantBuilderConversationView> {
-    return this.requireAssistantBuilderRuntime().getConversation(sessionId)
-  }
-
-  configureAssistantBuilder(
-    sessionId: string,
-    provider: string,
-    model: string,
-  ): Promise<AssistantBuilderConversationView> {
-    return this.requireAssistantBuilderRuntime().configure(sessionId, provider, model)
-  }
-
-  sendAssistantBuilderMessage(sessionId: string, content: string): Promise<{ messageId: string }> {
-    return this.requireAssistantBuilderRuntime().sendMessage(sessionId, content)
-  }
-
-  respondToAssistantBuilderInteraction(
-    sessionId: string,
-    interactionId: string,
-    response: InteractionResponseInput,
-  ): Promise<void> {
-    return this.requireAssistantBuilderRuntime().respondToInteraction(sessionId, interactionId, response)
-  }
-
-  stopAssistantBuilder(sessionId: string): Promise<void> {
-    return this.requireAssistantBuilderRuntime().stop(sessionId)
-  }
-
-  archiveAssistantBuilderConversation(sessionId: string): Promise<void> {
-    return this.requireAssistantBuilderRuntime().archiveConversation(sessionId)
-  }
-
   getTeam(id: string): TeamAggregate {
     return requireTeam(this.store, id)
   }
@@ -443,10 +340,7 @@ export class AgentTeamService extends Service {
     if (leaders.length !== 1) {
       throw new AgentTeamError('TEAM_INVALID_LEADER', 'A team must contain exactly one leader')
     }
-    const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(input.workspaceId))
-    if (workspace === undefined || await workspace.status() !== 'ok') {
-      throw new AgentTeamError('WORKSPACE_UNAVAILABLE', `Workspace '${input.workspaceId}' is unavailable`)
-    }
+    const workspace = await this.defaultWorkspace()
 
     const now = new Date().toISOString()
     const members: Record<string, TeamMemberSlot> = {}
@@ -489,7 +383,6 @@ export class AgentTeamService extends Service {
       updatedAt: now,
     }
     await this.store.putTeam(team)
-    this.workspace.watch(team.id, team.workspacePath)
     await this.activity('team.created', team.id, team.revision, `Team ${team.name} draft created`)
     this.publish('team', team.id, team.revision, 'team.created')
     return team
@@ -498,10 +391,6 @@ export class AgentTeamService extends Service {
   async cloneTeam(sourceTeamId: string, raw: CloneTeamInput): Promise<TeamAggregate> {
     const input = cloneTeamInputSchema.parse(raw)
     const source = requireTeam(this.store, sourceTeamId)
-    const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(input.workspaceId))
-    if (workspace === undefined || await workspace.status() !== 'ok') {
-      throw new AgentTeamError('WORKSPACE_UNAVAILABLE', `Workspace '${input.workspaceId}' is unavailable`)
-    }
 
     const now = new Date().toISOString()
     const members: Record<string, TeamMemberSlot> = {}
@@ -519,8 +408,8 @@ export class AgentTeamService extends Service {
       schemaVersion: 1,
       id: randomUUID(),
       name: input.name.trim(),
-      workspaceId: String(workspace.id),
-      workspacePath: workspace.path,
+      workspaceId: source.workspaceId,
+      workspacePath: source.workspacePath,
       leaderSlotId,
       state: 'draft',
       directMemberChat: source.directMemberChat,
@@ -534,7 +423,6 @@ export class AgentTeamService extends Service {
       updatedAt: now,
     }
     await this.store.putTeam(team)
-    this.workspace.watch(team.id, team.workspacePath)
     await this.activity('team.cloned', team.id, team.revision, `Team ${team.name} cloned from ${source.name}`)
     this.publish('team', team.id, team.revision, 'team.cloned')
     return team
@@ -760,48 +648,6 @@ export class AgentTeamService extends Service {
     this.publish('conversation', teamId, revision, 'member.conversation', conversation)
   }
 
-  publishAssistantBuilderConversation(conversation: AssistantBuilderConversationView): void {
-    const change: AgentTeamChange = {
-      cursor: ++this.cursor,
-      entityType: 'assistant-builder',
-      entityId: conversation.sessionId,
-      revision: Math.max(0, conversation.throughSeq + 1),
-      kind: 'assistant.builder.conversation',
-      assistantBuilderConversation: conversation,
-    }
-    for (const listener of this.listeners) listener(change)
-  }
-
-  async listWorkspace(teamId: string, rawPath = ''): Promise<WorkspaceEntryView[]> {
-    return this.workspace.list(teamId, rawPath)
-  }
-
-  async searchWorkspace(teamId: string, query = '', limit = 40): Promise<WorkspaceEntryView[]> {
-    return this.workspace.search(teamId, query, limit)
-  }
-
-  async getWorkspaceChanges(teamId: string): Promise<WorkspaceGitStatusView> {
-    return this.workspace.changes(teamId)
-  }
-
-  async getWorkspaceDiff(
-    teamId: string,
-    path: string,
-    scope: 'staged' | 'unstaged',
-    layout: 'unified' | 'split',
-    theme: 'light' | 'dark',
-  ): Promise<WorkspaceGitDiffView> {
-    return this.workspace.diff(teamId, path, scope, layout, theme)
-  }
-
-  async uploadWorkspaceFile(
-    teamId: string,
-    rawName: string,
-    data: Uint8Array,
-  ): Promise<WorkspaceUploadView> {
-    return this.workspace.upload(teamId, rawName, data)
-  }
-
   listMessages(teamId: string): Page<TeamMessage> {
     requireTeam(this.store, teamId)
     const items = this.store.listMessages(teamId)
@@ -858,16 +704,14 @@ export class AgentTeamService extends Service {
     await Promise.all(this.store.listMessages(teamId).map(message => this.store.deleteMessage(message.id)))
     await Promise.all(this.store.listActivities(teamId).map(activity => this.store.deleteActivity(activity.id)))
     await this.store.deleteTeam(teamId)
-    await this.workspace.unwatch(teamId)
     this.publish('team', teamId, team.revision + 1, 'team.deleted')
   }
 
-  getOperation(id: string): Operation {
-    const operation = this.store.getOperation(id)
-    if (operation === undefined) {
-      throw new AgentTeamError('INVALID_REQUEST', `Unknown operation '${id}'`)
+  private async defaultWorkspace(): Promise<ReturnType<Context['workspaceRegistry']['list']>[number]> {
+    for (const workspace of this.ctx.workspaceRegistry.list()) {
+      if (await workspace.status() === 'ok') return workspace
     }
-    return operation
+    throw new AgentTeamError('WORKSPACE_UNAVAILABLE', 'No available runtime directory is configured')
   }
 
   private async validateAssistantReferences(input: CreateAssistantInput): Promise<void> {
@@ -970,12 +814,6 @@ export class AgentTeamService extends Service {
     if (this.runtime === undefined) throw new Error('Agent Team runtime is not attached')
     return this.runtime
   }
-
-
-  private requireAssistantBuilderRuntime(): AssistantBuilderRuntime {
-    if (this.assistantBuilderRuntime === undefined) throw new Error('Assistant Builder runtime is not attached')
-    return this.assistantBuilderRuntime
-  }
 }
 
 function requireAssistant(store: AgentTeamStore, id: string): AssistantTemplate {
@@ -1042,6 +880,14 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }
 
+function withReasoningEffort(
+  member: TeamMemberSlot,
+  reasoningEffort: string | undefined,
+): TeamMemberSlot {
+  const { reasoningEffort: _current, ...rest } = member
+  return reasoningEffort === undefined ? rest : { ...rest, reasoningEffort }
+}
+
 function createMemberSlot(
   assistant: AssistantTemplate,
   displayName: string,
@@ -1084,14 +930,6 @@ function cloneMemberSlot(source: TeamMemberSlot, now: string): TeamMemberSlot {
     lastRuntimeState: 'offline',
     joinedAt: now,
   }
-}
-
-function withReasoningEffort(
-  member: TeamMemberSlot,
-  reasoningEffort: string | undefined,
-): TeamMemberSlot {
-  const { reasoningEffort: _current, ...rest } = member
-  return reasoningEffort === undefined ? rest : { ...rest, reasoningEffort }
 }
 
 function assertMemberHasNoOpenTasks(team: TeamAggregate, slotId: string): void {

@@ -4,7 +4,7 @@ export function memberPrompt(team: TeamAggregate, member: TeamMemberSlot): strin
   return [
     `You are ${member.displayName}, an independent Agent in the team “${team.name}”.`,
     `Your role is ${member.role}. The leader coordinates work but does not own other Agents.`,
-    'All team members operate in the same Workspace. Coordinate before editing overlapping files.',
+    'Coordinate with other team members before editing overlapping files.',
     member.assistantSnapshot.instructions,
   ].filter(Boolean).join('\n\n')
 }

@@ -91,12 +91,6 @@ export const fileScopeLeaseSchema = z.object({
   expiresAt: isoDate.optional(),
 }).strict()
 
-const attachmentRefSchema = z.object({
-  kind: z.enum(['workspace_path', 'url']),
-  value: nonEmpty,
-  label: z.string().optional(),
-}).strict()
-
 export const teamMessageSchema = z.object({
   schemaVersion: z.literal(1),
   id: nonEmpty,
@@ -112,7 +106,6 @@ export const teamMessageSchema = z.object({
   type: z.enum(['instruction', 'progress', 'result', 'question', 'warning', 'system']),
   content: z.string(),
   relatedTaskId: nonEmpty.optional(),
-  attachments: z.array(attachmentRefSchema),
   deliveryState: z.enum(['queued', 'delivered', 'read', 'failed']),
   idempotencyKey: nonEmpty,
   createdAt: isoDate,
@@ -156,20 +149,6 @@ export const teamActivitySchema = z.object({
   createdAt: isoDate,
 }).strict()
 
-export const operationSchema = z.object({
-  schemaVersion: z.literal(1),
-  id: nonEmpty,
-  teamId: nonEmpty.optional(),
-  kind: z.enum(['dissolve_team', 'remove_member', 'sync_member', 'migrate_records']),
-  state: z.enum(['pending', 'running', 'blocked', 'completed', 'failed']),
-  stage: nonEmpty,
-  cursor: z.string().optional(),
-  errorCode: z.string().optional(),
-  errorMessage: z.string().optional(),
-  createdAt: isoDate,
-  updatedAt: isoDate,
-}).strict()
-
 export const createAssistantInputSchema = assistantTemplateSchema.pick({
   name: true,
   description: true,
@@ -195,12 +174,10 @@ export const addTeamMemberInputSchema = createTeamMemberInputSchema.omit({ role:
 
 export const createTeamDraftInputSchema = z.object({
   name: nonEmpty,
-  workspaceId: nonEmpty,
   directMemberChat: z.boolean().optional(),
   members: z.array(createTeamMemberInputSchema).min(1),
 }).strict()
 
 export const cloneTeamInputSchema = z.object({
   name: nonEmpty,
-  workspaceId: nonEmpty,
 }).strict()

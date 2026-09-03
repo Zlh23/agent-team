@@ -1,4 +1,4 @@
-export type ComposerTriggerKind = 'skill' | 'file'
+export type ComposerTriggerKind = 'skill'
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind
@@ -34,16 +34,15 @@ export function composerTriggerAt(value: string, rawCursor: number): ComposerTri
   if (token.length === 0) return undefined
 
   const marker = token[0]
-  if (marker !== '/' && marker !== '@') return undefined
-  if (marker === '@' && token.startsWith('@"')) return undefined
+  if (marker !== '/') return undefined
 
   const query = token.slice(1)
-  if (marker === '/' && !/^[a-zA-Z0-9._-]*$/.test(query)) return undefined
+  if (!/^[a-zA-Z0-9._-]*$/.test(query)) return undefined
 
   let end = cursor
   while (end < value.length && !/\s/.test(value[end] ?? '')) end += 1
   return {
-    kind: marker === '/' ? 'skill' : 'file',
+    kind: 'skill',
     start,
     end,
     query,

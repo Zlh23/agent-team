@@ -53,7 +53,7 @@ export function registerTeamTools(
       title: { type: 'string', required: true },
       description: { type: 'string' },
       ownerSlotId: { type: 'string', description: 'Current member slot id to assign.' },
-      fileScopes: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative file scopes.' },
+      fileScopes: { type: 'array', items: { type: 'string' }, description: 'Project-relative file scopes.' },
     },
     output: {
       schema: {

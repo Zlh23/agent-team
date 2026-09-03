@@ -5,10 +5,6 @@ export interface Config {
   sseHeartbeatMs: number
   runtimeConcurrency: number
   directMemberChatDefault: boolean
-  assistantBuilderProvider: string
-  assistantBuilderModel: string
-  assistantBuilderAgentPresetId: string
-  assistantBuilderPermissionPresetId: string
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -16,8 +12,4 @@ export const Config: Schema<Config> = Schema.object({
   sseHeartbeatMs: Schema.number().min(5_000).max(120_000).default(20_000),
   runtimeConcurrency: Schema.number().min(1).max(32).default(4),
   directMemberChatDefault: Schema.boolean().default(true),
-  assistantBuilderProvider: Schema.string().default(''),
-  assistantBuilderModel: Schema.string().default(''),
-  assistantBuilderAgentPresetId: Schema.string().default(''),
-  assistantBuilderPermissionPresetId: Schema.string().default(''),
 })
