@@ -3,6 +3,7 @@ import { extname, join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
 const sourceRoot = join(root, 'src')
+const clientMarker = join('src', 'client')
 const prohibited = [
   [/@deepseek-ai\/dsh-subagent/, 'Subagent package import'],
   [/\bsubagents\b/, 'Subagent service access'],
@@ -19,11 +20,17 @@ const prohibited = [
   [/(^|[^\w.])(?:alert|confirm|prompt)\s*\(/m, 'Browser-native dialogs are prohibited; use Harness Modal'],
 ]
 
+// Browser-side client files may reference the subagent wire type (opening a
+// teammate Session as a subagent view); the server side stays subagent-free.
+const clientExempted = new Set(['Subagent package import'])
 const violations = []
 for (const file of await files(sourceRoot)) {
   const content = await readFile(file, 'utf8')
+  const isClient = file.includes(clientMarker)
   for (const [pattern, label] of prohibited) {
-    if (pattern.test(content)) violations.push(`${relative(root, file)}: ${label}`)
+    if (pattern.test(content) && !(isClient && clientExempted.has(label))) {
+      violations.push(`${relative(root, file)}: ${label}`)
+    }
   }
 }
 

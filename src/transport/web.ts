@@ -237,6 +237,10 @@ async function dispatch(service: AgentTeamService, request: AgentTeamRequest): P
       await service.dissolveTeam(payload.teamId, payload.confirmation, options)
       return null
     }
+    case 'team.open': {
+      const payload = z.object({ teamId: z.string().min(1) }).strict().parse(request.payload)
+      return service.getTeam(payload.teamId)
+    }
   }
 }
 

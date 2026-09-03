@@ -30,6 +30,7 @@ export const AGENT_TEAM_METHODS = [
   'team.interaction.respond',
   'team.member.setPermissionPreset',
   'team.dissolve',
+  'team.open',
 ] as const
 
 export type AgentTeamMethod = typeof AGENT_TEAM_METHODS[number]
@@ -192,6 +193,7 @@ export interface AgentTeamRequestMap {
     result: TeamView
   }
   'team.dissolve': { payload: { teamId: string; confirmation: string }; result: null }
+  'team.open': { payload: { teamId: string }; result: TeamView }
 }
 
 export type AgentTeamPayload<M extends AgentTeamMethod> = AgentTeamRequestMap[M]['payload']
